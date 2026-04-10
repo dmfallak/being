@@ -1,0 +1,6 @@
+node_modules/
+qdrant_data/
+.env
+.worktrees/
+dist/
+*.log
