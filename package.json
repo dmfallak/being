@@ -1,0 +1,29 @@
+{
+  "name": "being",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.68",
+    "@ai-sdk/google": "^3.0.61",
+    "ai": "^6.0.156",
+    "dotenv": "^17.4.1",
+    "pg": "^8.20.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/pg": "^8.20.0",
+    "ts-node": "^10.9.2",
+    "vitest": "^4.1.4"
+  }
+}
