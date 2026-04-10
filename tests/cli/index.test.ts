@@ -16,8 +16,22 @@ test('startSession should call generatePrompt and updateState', async () => {
 
   await startSession('initial', mockRl);
 
-  expect(generatePromptSpy).toHaveBeenCalledWith('initial');
+  expect(generatePromptSpy).toHaveBeenCalledWith('initial', undefined);
   expect(updateStateSpy).toHaveBeenCalledWith('initial', 'hello');
-  expect(generatePromptSpy).toHaveBeenCalledWith('initial-hello');
+  expect(generatePromptSpy).toHaveBeenCalledWith('initial-hello', undefined);
   expect(mockRl.question).toHaveBeenCalledTimes(2);
+});
+
+test('startSession should pass budget to generatePrompt', async () => {
+  const generatePromptSpy = vi.spyOn(promptModule, 'generatePrompt');
+
+  const mockRl = {
+    question: vi.fn().mockResolvedValueOnce('exit'),
+    close: vi.fn(),
+  } as any;
+
+  const budget = ['time', 'energy'];
+  await startSession('initial', mockRl, budget);
+
+  expect(generatePromptSpy).toHaveBeenCalledWith('initial', budget);
 });
