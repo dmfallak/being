@@ -7,6 +7,7 @@ import * as embedModule from '../../src/lib/embed.js';
 import * as dbModule from '../../src/lib/db.js';
 
 vi.mock('../../src/lib/embed.js', () => ({ embed: vi.fn().mockResolvedValue([0.1, 0.2]) }));
+vi.mock('../../src/lib/entity.js', () => ({ extractFacts: vi.fn().mockResolvedValue([]) }));
 vi.mock('../../src/lib/db.js', () => ({
   createConversation: vi.fn().mockResolvedValue({ id: 'conv-1', user_id: 'default', created_at: new Date() }),
   saveMessage: vi.fn().mockResolvedValue({}),
