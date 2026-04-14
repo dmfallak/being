@@ -1,20 +1,37 @@
+// src/cli/index.ts
 import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
-import { generatePrompt } from '../lib/prompt.js';
+import { buildSystemPrompt } from '../lib/seed.js';
+import { generateResponse } from '../lib/llm.js';
 import { updateState } from '../lib/ssm.js';
+import type { Message } from '../lib/llm.js';
 
-export async function startSession(initialState: string, rl?: readline.Interface, budget?: string[]) {
-  const interfaceInstance = rl || readline.createInterface({ input, output });
+export async function startSession(
+  initialState: string,
+  rl?: readline.Interface,
+  budget?: string[],
+): Promise<void> {
+  const interfaceInstance = rl ?? readline.createInterface({ input, output });
   let currentState = initialState;
+  const history: Message[] = [];
 
   try {
     while (true) {
-      const prompt = generatePrompt(currentState, budget);
-      const userInput = await interfaceInstance.question(prompt);
+      const userInput = await interfaceInstance.question('You: ');
 
       if (userInput.toLowerCase() === 'exit' || userInput.toLowerCase() === 'quit') {
         break;
       }
+
+      history.push({ role: 'user', content: userInput });
+
+      const systemPrompt = buildSystemPrompt(
+        budget && budget.length > 0 ? budget.join('\n') : undefined,
+      );
+      const response = await generateResponse(systemPrompt, [...history]);
+
+      process.stdout.write(`\nBeing: ${response}\n\n`);
+      history.push({ role: 'assistant', content: response });
 
       currentState = await updateState(currentState, userInput);
     }
@@ -26,6 +43,5 @@ export async function startSession(initialState: string, rl?: readline.Interface
 }
 
 if (process.argv[1]?.endsWith('index.js')) {
-  const initialState = 'I am alive.';
-  startSession(initialState).catch(console.error);
+  startSession('I am alive.').catch(console.error);
 }

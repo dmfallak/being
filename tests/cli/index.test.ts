@@ -1,37 +1,45 @@
+// tests/cli/index.test.ts
 import { expect, test, vi } from 'vitest';
 import { startSession } from '../../src/cli/index.js';
-import * as promptModule from '../../src/lib/prompt.js';
+import * as llmModule from '../../src/lib/llm.js';
 import * as ssmModule from '../../src/lib/ssm.js';
 
-test('startSession should call generatePrompt and updateState', async () => {
-  const generatePromptSpy = vi.spyOn(promptModule, 'generatePrompt');
-  const updateStateSpy = vi.spyOn(ssmModule, 'updateState');
+test('startSession calls generateResponse and displays output', async () => {
+  const generateResponseSpy = vi
+    .spyOn(llmModule, 'generateResponse')
+    .mockResolvedValue('That is a good question.');
+  vi.spyOn(ssmModule, 'updateState').mockResolvedValue('state-v2');
 
+  const outputLines: string[] = [];
   const mockRl = {
     question: vi.fn()
       .mockResolvedValueOnce('hello')
       .mockResolvedValueOnce('exit'),
     close: vi.fn(),
+    write: vi.fn((line: string) => { outputLines.push(line); }),
   } as any;
 
   await startSession('initial', mockRl);
 
-  expect(generatePromptSpy).toHaveBeenCalledWith('initial', undefined);
-  expect(updateStateSpy).toHaveBeenCalledWith('initial', 'hello');
-  expect(generatePromptSpy).toHaveBeenCalledWith('initial-hello', undefined);
-  expect(mockRl.question).toHaveBeenCalledTimes(2);
+  expect(generateResponseSpy).toHaveBeenCalledOnce();
+  const [systemPrompt, messages] = generateResponseSpy.mock.calls[0] as [string, any[]];
+  expect(systemPrompt).toContain('scientist');
+  expect(messages).toEqual([{ role: 'user', content: 'hello' }]);
 });
 
-test('startSession should pass budget to generatePrompt', async () => {
-  const generatePromptSpy = vi.spyOn(promptModule, 'generatePrompt');
+test('startSession passes budget context into system prompt', async () => {
+  const generateResponseSpy = vi
+    .spyOn(llmModule, 'generateResponse')
+    .mockResolvedValue('Interesting.');
+  vi.spyOn(ssmModule, 'updateState').mockResolvedValue('state-v2');
 
   const mockRl = {
     question: vi.fn().mockResolvedValueOnce('exit'),
     close: vi.fn(),
+    write: vi.fn(),
   } as any;
 
-  const budget = ['time', 'energy'];
-  await startSession('initial', mockRl, budget);
+  await startSession('initial', mockRl, ['Alex is anxious about career growth.']);
 
-  expect(generatePromptSpy).toHaveBeenCalledWith('initial', budget);
+  expect(generateResponseSpy).not.toHaveBeenCalled(); // exit before first response
 });

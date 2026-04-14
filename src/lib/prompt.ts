@@ -1,8 +1,11 @@
-export function generatePrompt(state: string, budget?: string[] | null) {
-  let prompt = `Internal State: ${state}\n`;
+// src/lib/prompt.ts
+import { buildSystemPrompt } from './seed.js';
+
+export function generatePrompt(state: string, budget?: string[] | null): string {
+  let prompt = buildSystemPrompt();
   if (budget && budget.length > 0) {
-    prompt += `Historical Context: ${budget.join('\n')}\n`;
+    prompt += `\n\nHistorical Context: ${budget.join('\n')}`;
   }
-  prompt += `User: `;
+  prompt += `\n\nInternal State: ${state}\nUser: `;
   return prompt;
 }
