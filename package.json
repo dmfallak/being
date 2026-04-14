@@ -8,7 +8,8 @@
   },
   "type": "module",
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "migrate": "tsx src/db/migrate.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.68",
