@@ -10,7 +10,7 @@ test('buildSystemPrompt includes seed character', () => {
 
 test('buildSystemPrompt includes morning state when provided', () => {
   const prompt = buildSystemPrompt('I have been thinking about emergence.');
-  expect(prompt).toContain('I have been thinking about emergence.');
+  expect(prompt).toContain('This morning: I have been thinking about emergence.');
 });
 
 test('buildSystemPrompt omits morning state section when not provided', () => {
