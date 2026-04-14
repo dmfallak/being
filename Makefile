@@ -1,4 +1,7 @@
-.PHONY: run
+.PHONY: db run
+
+db:
+	docker compose up -d db
 
 run:
-	docker compose run --build --rm being
+	npm run migrate && npx tsx src/cli/index.ts
