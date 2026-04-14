@@ -18,7 +18,7 @@ test('generateResponse returns LLM text and calls SDK with correct args', async 
   ]);
 
   expect(result).toBe('I find that fascinating.');
-  expect(google).toHaveBeenCalledWith('gemini-2.0-flash');
+  expect(google).toHaveBeenCalledWith('gemini-3-flash-preview');
   expect(generateText).toHaveBeenCalledWith({
     model: 'mock-model',
     system: 'You are a scientist.',

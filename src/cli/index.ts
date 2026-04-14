@@ -69,6 +69,6 @@ export async function startSession(
   }
 }
 
-if (process.argv[1]?.endsWith('index.js')) {
+if (process.argv[1] && /index\.(ts|js)$/.test(process.argv[1])) {
   startSession('I am alive.').catch(console.error);
 }
