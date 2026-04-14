@@ -8,7 +8,7 @@ export async function generateResponse(
   messages: Message[],
 ): Promise<string> {
   const { text } = await generateText({
-    model: google('gemini-2.0-flash'),
+    model: google('gemini-3-flash-preview'),
     system: systemPrompt,
     messages,
   });
