@@ -7,6 +7,7 @@ import { updateState } from '../lib/ssm.js';
 import { embed } from '../lib/embed.js';
 import { createConversation, saveMessage } from '../lib/db.js';
 import { extractFacts } from '../lib/entity.js';
+import { buildContextBudget } from '../lib/waking.js';
 import type { Message } from '../lib/llm.js';
 
 const DEFAULT_USER_ID = 'default';
@@ -20,6 +21,7 @@ export async function startSession(
   let currentState = initialState;
   const history: Message[] = [];
   let conversationId: string | null = null;
+  const contextBudget = budget ?? await buildContextBudget(DEFAULT_USER_ID, '').catch(() => []);
 
   try {
     while (true) {
@@ -42,7 +44,7 @@ export async function startSession(
       history.push({ role: 'user', content: userInput });
 
       const systemPrompt = buildSystemPrompt(
-        budget && budget.length > 0 ? budget.join('\n') : undefined,
+        contextBudget.length > 0 ? contextBudget.join('\n') : undefined,
       );
       const response = await generateResponse(systemPrompt, history);
 

@@ -57,3 +57,27 @@ export async function upsertEntityFact(
     [userId, content, salience, vectorParam],
   );
 }
+
+export async function getEntityFactEmbeddings(
+  userId: string,
+  queryEmbedding: number[],
+  limit = 50,
+): Promise<Array<{ id: string; content: string; salience: number; similarity: number }>> {
+  const vectorParam = `[${queryEmbedding.join(',')}]`;
+  const result = await db.query<{
+    id: string;
+    content: string;
+    salience: number;
+    similarity: number;
+  }>(
+    `SELECT id, content, salience,
+            1 - (embedding <=> $1::vector) AS similarity
+     FROM entity_facts
+     WHERE user_id = $2
+       AND embedding IS NOT NULL
+     ORDER BY embedding <=> $1::vector
+     LIMIT $3`,
+    [vectorParam, userId, limit],
+  );
+  return result.rows;
+}
