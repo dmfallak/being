@@ -25,7 +25,12 @@ export async function startSession(
 
   try {
     while (true) {
-      const userInput = await interfaceInstance.question('You: ');
+      let userInput: string;
+      try {
+        userInput = await interfaceInstance.question('You: ');
+      } catch {
+        break; // EOF (Ctrl+D) — exit cleanly
+      }
 
       if (userInput.toLowerCase() === 'exit' || userInput.toLowerCase() === 'quit') {
         break;
