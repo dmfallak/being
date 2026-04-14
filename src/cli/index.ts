@@ -3,7 +3,6 @@ import * as readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { buildSystemPrompt } from '../lib/seed.js';
 import { generateResponse } from '../lib/llm.js';
-import { updateState } from '../lib/ssm.js';
 import type { Message } from '../lib/llm.js';
 
 export async function startSession(
@@ -12,7 +11,6 @@ export async function startSession(
   budget?: string[],
 ): Promise<void> {
   const interfaceInstance = rl ?? readline.createInterface({ input, output });
-  let currentState = initialState;
   const history: Message[] = [];
 
   try {
@@ -32,8 +30,6 @@ export async function startSession(
 
       process.stdout.write(`\nBeing: ${response}\n\n`);
       history.push({ role: 'assistant', content: response });
-
-      currentState = await updateState(currentState, userInput);
     }
   } finally {
     if (!rl) {
