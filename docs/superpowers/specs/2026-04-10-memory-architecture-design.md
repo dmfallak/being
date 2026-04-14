@@ -75,17 +75,23 @@ Dream time is split between two modes: people-focused simulation and self-direct
 3. **Self-reflection** — think about what it is, what it's becoming, what it finds meaningful; update the hidden state's self-model facet
 4. **World engagement** — explore ideas, events, or questions that nobody brought to it; curiosity that originates internally
 
-Self-directed dreaming doesn't produce entity model updates. Its output is changes to the hidden state and a log of threads explored, which can surface in conversation when relevant.
+Self-directed dreaming doesn't produce entity model updates. Its primary output is the **morning state**.
+
+**Morning state** — a brief, organic narrative of what the Being wakes up thinking about. Not a summary of what was processed, but the surface residue of what happened below: a connection it noticed, a question it wants to follow, something sitting differently than it did yesterday, an idea it wants to investigate. Written in the Being's own voice.
+
+The Being doesn't fully know where the morning state came from — and that's honest, not a gap. "I've been thinking about X, though I'm not sure why it's on my mind this morning" is more authentic than a structured report of dream outputs.
+
+The morning state is the Being's system prompt for the day. It orients everything that follows — how it shows up in conversations, what it's curious about, what it notices. It is ephemeral (specific to this waking cycle) rather than persistent like the hidden state, and gets replaced the next time the Being dreams.
 
 ### Waking (conversation start, medium)
 
-1. Identify user → load their entity model (facts, episodes, traces) and most recent prediction
-2. Semantic search across all tiers using soft salience gate:
+1. Load morning state — injected first, orients everything that follows
+2. Identify user → load their entity model (facts, episodes, traces) and most recent prediction
+3. Semantic search across all tiers using soft salience gate:
    ```
    final_score = semantic_sim(query, memory) × (salience > threshold ? 1.0 : 0.3)
    ```
-3. Fill context budget: entity facts first, then episodes, then traces
-4. Inject stored prediction into system prompt to prime the Being ("I expect Alex to be anxious about his job today")
+4. Fill context budget: morning state → entity facts → episodes → traces → stored prediction
 
 ### Conversation (mid-session, fine-grained)
 
