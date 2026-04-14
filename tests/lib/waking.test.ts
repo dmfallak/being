@@ -6,10 +6,6 @@ vi.mock('../../src/lib/embed.js', () => ({
 }));
 
 vi.mock('../../src/lib/db.js', () => ({
-  getEntityFacts: vi.fn().mockResolvedValue([
-    { id: '1', user_id: 'u1', content: 'Alex values directness', salience: 0.8, created_at: new Date(), updated_at: new Date() },
-    { id: '2', user_id: 'u1', content: 'Alex mentioned enjoying hiking', salience: 0.3, created_at: new Date(), updated_at: new Date() },
-  ]),
   getEntityFactEmbeddings: vi.fn().mockResolvedValue([
     { id: '1', content: 'Alex values directness', salience: 0.8, similarity: 0.9 },
     { id: '2', content: 'Alex mentioned enjoying hiking', salience: 0.3, similarity: 0.2 },
