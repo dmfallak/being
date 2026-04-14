@@ -53,7 +53,7 @@ export async function upsertEntityFact(
   await db.query(
     `INSERT INTO entity_facts (user_id, content, salience, embedding)
      VALUES ($1, $2, $3, $4::vector)
-     ON CONFLICT DO NOTHING`,
+     ON CONFLICT (user_id, content) DO UPDATE SET updated_at = now()`,
     [userId, content, salience, vectorParam],
   );
 }
