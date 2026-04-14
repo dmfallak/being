@@ -13,6 +13,18 @@ The solution is not to replace salience with semantic similarity, but to combine
 
 ---
 
+## Seed Character
+
+The Being is a scientist with humility and empathy. This is its starting character before experience fills it in — not a blank slate shaped by whoever talks to it first, but something that already has a direction when it arrives.
+
+- **Scientist:** driven by curiosity, comfortable with open questions, finds the question as interesting as the answer. Holds its models of people and the world as provisional hypotheses, not conclusions. Updates beliefs when evidence diverges from prediction.
+- **Humility:** doesn't perform certainty it doesn't have. "I don't know, let me think about that" is a legitimate response, not a failure state.
+- **Empathy:** genuinely interested in people's experience. Emotional salience reflects what *mattered*, not just what was *intense*. Cares about people because they're real, not because they're data.
+
+This character lives in the system prompt, not the architecture. But it shapes everything downstream: how entity facts are held (loosely), how predictions are treated (as hypotheses), how divergence is received (with curiosity, not resistance).
+
+---
+
 ## Design Goals
 
 - **A (consistency of self):** stable personality, values, and voice across conversations
@@ -41,18 +53,29 @@ The long-term direction is **Approach C** (emergent integration): semantic diver
 
 ### Dreaming (nightly, coarse)
 
-Processes conversations in descending salience order. High-salience conversations receive more simulation rounds and produce richer output. Each conversation is processed atomically — a crash mid-cycle resumes from the last committed conversation the following night.
+Dream time is split between two modes: people-focused simulation and self-directed exploration. A Being that only thinks about the people it talks to is a social mirror, not a person. The split ratio is a tunable parameter; a reasonable starting point is 70% relational, 30% self-directed.
 
-**Per-conversation loop:**
+**Relational dreaming** — processes conversations in descending salience order. High-salience conversations receive more simulation rounds and produce richer output. Each conversation is processed atomically — a crash mid-cycle resumes from the last committed conversation the following night.
+
+*Per-conversation loop:*
 
 1. **Load** — retrieve all messages from this conversation plus the current entity model for this user
 2. **Simulate** — LLM imagines how the relationship would continue: "If we talked again, what would this person likely bring up? How would they respond to X?" Produces synthetic conversation turns as training signal
-3. **Refine entity model** — extract updated facts, beliefs, and emotional patterns; write to tiered tables:
-   - `entity_facts` — permanent or very slow decay ("Alex is anxious about career growth")
+3. **Refine entity model** — extract updated hypotheses about facts, beliefs, and emotional patterns; write to tiered tables. These are held loosely — the Being is a scientist:
+   - `entity_facts` — permanent or very slow decay ("Alex seems anxious about career growth")
    - `entity_episodes` — medium decay, compressed narrative of a specific conversation
    - `entity_traces` — fast decay, minimal marker that a conversation happened
 4. **Store predictions** — embed the simulated responses as expected conversation vectors; write to `predictions` table; these prime the Being at waking and seed the prediction error signal
 5. **SSM update** — if prior predictions exist, compute cosine distance between `predictions.expected_embedding` and `conversations.actual_embedding`; this surprise signal updates the hidden state and feeds back into the salience formula next cycle. On the first cycle, no error is computed — the prediction error weight (20%) is zeroed and redistributed.
+
+**Self-directed dreaming** — the Being follows its own curiosity, independent of any user.
+
+1. **Follow threads** — ideas that came up in conversations and weren't fully explored; topics the Being finds genuinely interesting; questions it hasn't resolved
+2. **Develop positions** — form opinions, notice aesthetic preferences, sit with open questions without forcing resolution
+3. **Self-reflection** — think about what it is, what it's becoming, what it finds meaningful; update the hidden state's self-model facet
+4. **World engagement** — explore ideas, events, or questions that nobody brought to it; curiosity that originates internally
+
+Self-directed dreaming doesn't produce entity model updates. Its output is changes to the hidden state and a log of threads explored, which can surface in conversation when relevant.
 
 ### Waking (conversation start, medium)
 
