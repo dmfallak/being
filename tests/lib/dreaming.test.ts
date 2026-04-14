@@ -1,8 +1,12 @@
+// tests/lib/dreaming.test.ts
 import { expect, test } from 'vitest';
 import { rankContexts } from '../../src/lib/dreaming.js';
 
-test('dreaming should rank contexts by emotional intensity', async () => {
-  const contexts = [{ id: '1', intensity: 0.1 }, { id: '2', intensity: 0.9 }];
+test('rankContexts sorts by computed salience descending', async () => {
+  const contexts = [
+    { id: '1', emotionalIntensity: 0.1, recencyScore: 0.1 },
+    { id: '2', emotionalIntensity: 0.9, recencyScore: 0.9 },
+  ];
   const ranked = await rankContexts(contexts);
-  expect(ranked[0].id).toBe('2');
+  expect(ranked[0]?.id).toBe('2');
 });
