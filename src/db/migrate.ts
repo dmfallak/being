@@ -26,13 +26,34 @@ export async function migrate(): Promise<void> {
   for (const file of files) {
     if (appliedSet.has(file)) continue;
     const sql = readFileSync(join(migrationsDir, file), 'utf8');
-    await db.query(sql);
-    await db.query('INSERT INTO schema_migrations (filename) VALUES ($1)', [file]);
+
+    if (file === '001_pgvector.sql') {
+      // CREATE EXTENSION cannot run inside a transaction in some Postgres versions
+      const statements = sql.split(/;\s*\n/).map(s => s.trim()).filter(Boolean);
+      for (const statement of statements) {
+        await db.query(statement);
+      }
+      await db.query('INSERT INTO schema_migrations (filename) VALUES ($1)', [file]);
+    } else {
+      await db.query('BEGIN');
+      try {
+        const statements = sql.split(/;\s*\n/).map(s => s.trim()).filter(Boolean);
+        for (const statement of statements) {
+          await db.query(statement);
+        }
+        await db.query('INSERT INTO schema_migrations (filename) VALUES ($1)', [file]);
+        await db.query('COMMIT');
+      } catch (err) {
+        await db.query('ROLLBACK');
+        throw err;
+      }
+    }
+
     console.log(`Migrated: ${file}`);
   }
 }
 
-if (process.argv[1]?.endsWith('migrate.js')) {
+if (process.argv[1] && /migrate\.(ts|js)$/.test(process.argv[1])) {
   migrate()
     .then(() => { console.log('Migrations complete.'); process.exit(0); })
     .catch(err => { console.error(err); process.exit(1); });

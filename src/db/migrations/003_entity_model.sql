@@ -38,17 +38,13 @@ CREATE TABLE IF NOT EXISTS predictions (
 );
 
 CREATE INDEX IF NOT EXISTS entity_facts_embedding_idx
-  ON entity_facts USING ivfflat (embedding vector_cosine_ops)
-  WITH (lists = 100);
+  ON entity_facts USING hnsw (embedding vector_cosine_ops);
 
 CREATE INDEX IF NOT EXISTS entity_episodes_embedding_idx
-  ON entity_episodes USING ivfflat (embedding vector_cosine_ops)
-  WITH (lists = 100);
+  ON entity_episodes USING hnsw (embedding vector_cosine_ops);
 
 CREATE INDEX IF NOT EXISTS entity_traces_embedding_idx
-  ON entity_traces USING ivfflat (embedding vector_cosine_ops)
-  WITH (lists = 100);
+  ON entity_traces USING hnsw (embedding vector_cosine_ops);
 
 CREATE INDEX IF NOT EXISTS predictions_embedding_idx
-  ON predictions USING ivfflat (expected_embedding vector_cosine_ops)
-  WITH (lists = 100);
+  ON predictions USING hnsw (expected_embedding vector_cosine_ops);

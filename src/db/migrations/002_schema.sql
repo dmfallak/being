@@ -20,5 +20,4 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 
 CREATE INDEX IF NOT EXISTS messages_embedding_idx
-  ON messages USING ivfflat (embedding vector_cosine_ops)
-  WITH (lists = 100);
+  ON messages USING hnsw (embedding vector_cosine_ops);
