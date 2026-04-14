@@ -12,21 +12,21 @@ test('computeSalience weights intensity, recency, prediction error, decay', () =
   expect(score).toBeCloseTo(1.0);
 });
 
-test('computeSalience zeros prediction error when absent', () => {
-  const withError = computeSalience({
-    emotionalIntensity: 1.0,
-    recencyScore: 1.0,
-    predictionError: 1.0,
-    decayFactor: 1.0,
+test('computeSalience redistributes null predictionError distinctly from zero', () => {
+  const withZero = computeSalience({
+    emotionalIntensity: 0.6,
+    recencyScore: 0.4,
+    predictionError: 0,
+    decayFactor: 0.5,
   });
-  const withoutError = computeSalience({
-    emotionalIntensity: 1.0,
-    recencyScore: 1.0,
+  const withNull = computeSalience({
+    emotionalIntensity: 0.6,
+    recencyScore: 0.4,
     predictionError: null,
-    decayFactor: 1.0,
+    decayFactor: 0.5,
   });
-  // Without prediction error, remaining weights are redistributed
-  expect(withoutError).toBeCloseTo(withError);
+  expect(withNull).not.toBeCloseTo(withZero);
+  expect(withNull).toBeCloseTo(0.6 * (0.3 + 0.2 / 3) + 0.4 * (0.3 + 0.2 / 3) + 0.5 * (0.2 + 0.2 / 3));
 });
 
 test('softGateScore penalises low-salience memories', () => {
