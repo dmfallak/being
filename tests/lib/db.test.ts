@@ -1,5 +1,9 @@
 import { expect, test, vi } from 'vitest';
 
+vi.mock('../../src/lib/config.js', () => ({
+  config: { GOOGLE_GENERATIVE_AI_API_KEY: 'test-key', DATABASE_URL: 'postgres://localhost/test' },
+}));
+
 vi.mock('pg', () => {
   const Pool = vi.fn(function() {
     this.query = vi.fn().mockResolvedValue({ rows: [{ val: 1 }] });
