@@ -1,0 +1,28 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: being
+      POSTGRES_PASSWORD: being
+      POSTGRES_DB: being
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U being"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  being:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://being:being@db:5432/being
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+    stdin_open: true
+    tty: true
+
+volumes:
+  pgdata:
