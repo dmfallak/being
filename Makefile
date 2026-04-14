@@ -1,4 +1,4 @@
 .PHONY: run
 
 run:
-	docker compose up --build being
+	docker compose run --build --rm being
