@@ -48,7 +48,7 @@ Dream is evaluated on every CLI startup, before the first user prompt.
 
 Dream runs if both conditions hold:
 
-1. There is at least one conversation for this user with `dreamed_at IS NULL`.
+1. There is at least one conversation for this user with `last_dream_at IS NULL`.
 2. Either no prior dream exists for this user, or the most recent dream's `started_at` is on a prior calendar day in system timezone, OR is at least 8 hours old.
 
 The 8-hour fallback handles the midnight-crossing edge case (CLI run at 11pm, closed, re-run at 12:15am should not re-trigger).
@@ -61,11 +61,11 @@ The dream runs as a single synchronous job, inside one transaction.
 
 ### Step 0 — Trigger check
 
-Query `dream_runs` for most recent run by `user_id`. Query `conversations` for any row with `dreamed_at IS NULL` for this user. Apply the gate logic above. Fast path: both queries return nothing blocking → skip.
+Query `dream_runs` for most recent run by `user_id`. Query `conversations` for any row with `last_dream_at IS NULL` for this user. Apply the gate logic above. Fast path: both queries return nothing blocking → skip.
 
 ### Step 1 — Load inputs
 
-- `SELECT * FROM conversations WHERE user_id = $1 AND dreamed_at IS NULL ORDER BY created_at ASC LIMIT 30`
+- `SELECT * FROM conversations WHERE user_id = $1 AND last_dream_at IS NULL ORDER BY created_at ASC LIMIT 30`
 - If the count of unprocessed conversations exceeded 30, the older ones are skipped this cycle. Record `cap_hit = true` in metadata.
 - `SELECT * FROM entity_facts WHERE user_id = $1` — loaded for both decay sweep and reflection context
 - Capture `dream_started_at = now()`
@@ -152,7 +152,7 @@ Inside the still-open transaction:
 
 - `INSERT INTO dream_runs (...)` with `completed_at = now()`, counts, `cap_hit`, error if any.
 - `INSERT INTO dream_residues (dream_run_id, user_id, prose, embedding)`.
-- `UPDATE conversations SET dreamed_at = now() WHERE id = ANY($1)` for the processed IDs.
+- `UPDATE conversations SET last_dream_at = now() WHERE id = ANY($1)` for the processed IDs.
 - Commit.
 
 If any step 2–5 fails irrecoverably, the transaction rolls back. Nothing persists. On the next wake, trigger check will see the same unprocessed conversations and retry.
@@ -168,11 +168,9 @@ Cost of re-embedding vs. storing and reusing the residue embedding from the drea
 
 ## Data Model
 
-One new migration: `src/db/migrations/005_dream_substrate.sql`.
+One new migration: `src/db/migrations/005_dream_substrate.sql`. Note that `conversations.last_dream_at` already exists (added in migration 002) and is reused here — migration 005 does not add that column.
 
 ```sql
-BEGIN;
-
 CREATE TABLE dream_runs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id text NOT NULL,
@@ -196,20 +194,19 @@ CREATE TABLE dream_residues (
 );
 CREATE INDEX dream_residues_user_created_idx ON dream_residues(user_id, created_at DESC);
 
-ALTER TABLE conversations ADD COLUMN dreamed_at timestamptz;
-CREATE INDEX conversations_user_dreamed_idx ON conversations(user_id) WHERE dreamed_at IS NULL;
+CREATE INDEX conversations_user_undreamed_idx ON conversations(user_id) WHERE last_dream_at IS NULL;
 
 ALTER TABLE entity_facts ADD COLUMN last_reinforced_at timestamptz NOT NULL DEFAULT now();
-
-COMMIT;
 ```
+
+No explicit `BEGIN`/`COMMIT` — `src/db/migrate.ts` wraps each file in its own transaction.
 
 Notes:
 
 - `dream_runs.user_id` and `dream_residues.user_id` are denormalized for fast per-user queries; this matches the existing pattern in `entity_facts`.
-- `conversations_user_dreamed_idx` is a partial index on unprocessed rows — the primary filter in Step 1 of the pipeline.
+- `conversations_user_undreamed_idx` is a partial index on unprocessed rows — the primary filter in Step 1 of the pipeline.
 - `last_reinforced_at` distinct from `updated_at`: `updated_at` is a row-bookkeeping concept, `last_reinforced_at` is a substrate concept. Decay reads the latter only.
-- Migration 005 is additive and safe: existing data gets `dreamed_at = NULL` (so all prior conversations are eligible for the first dream) and `last_reinforced_at = now()` (which starts decay from the migration moment, not from the fact's true age). The latter is an acknowledged approximation; old facts will initially over-survive decay until one more cycle.
+- Migration 005 is additive and safe. Existing conversations have `last_dream_at = NULL` so all prior conversations are eligible for the first dream. New entity facts get `last_reinforced_at = now()` at migration time, which starts decay from the migration moment rather than from the fact's true age — an acknowledged approximation that resolves after one dream cycle.
 
 ## Waking Integration
 
