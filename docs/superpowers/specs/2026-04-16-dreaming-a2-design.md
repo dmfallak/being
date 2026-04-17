@@ -87,6 +87,8 @@ Written back as a single `UPDATE` per-fact inside the transaction. `last_reinfor
 
 For each unprocessed conversation, in chronological order, make one LLM call via `generateResponse` (same model and infrastructure as conversational replies — currently `gemini-3-flash-preview`).
 
+**Temperature: 0.4.** This step produces structured JSON; we want accuracy and valid parsing more than creative association.
+
 **Prompt template (outline):**
 
 ```
@@ -120,7 +122,9 @@ Reflection calls are sequential, not batched. Quality of reflection suffers if t
 
 ### Step 4 — Integration / residue generation
 
-One final LLM call.
+One final LLM call via `generateResponse`.
+
+**Temperature: 1.0.** This step is meant to be generative — first-person reflection, unexpected connections, genuine novelty. Lower temperature produces dry summary, which is exactly not what a residue should feel like. The conceptual split between Step 3 (precise cataloging) and Step 4 (loose reflection) roughly mirrors non-REM vs REM phases in sleep research: one sorts memory, the other associates freely.
 
 **Prompt template (outline):**
 
@@ -223,6 +227,8 @@ Changes in `src/lib/seed.ts`: none. `buildSystemPrompt(lessonsOfYesterday)` alre
 New module: `src/lib/dream.ts`. Houses `maybeDream`, the trigger logic, and the orchestration of steps 1–5. Keeps the CLI thin.
 
 New module or addition to `src/lib/db.ts`: queries for dream_runs, dream_residues, unprocessed conversations, decay sweep.
+
+Changes in `src/lib/llm.ts`: extend `generateResponse` to accept an optional `{ temperature?: number }` third argument, passed through to the Vercel AI SDK's `generateText`. Existing callers remain unchanged (no argument = current behavior). Dream reflection calls pass `{ temperature: 0.4 }`; residue generation passes `{ temperature: 1.0 }`.
 
 ## Error Handling
 
