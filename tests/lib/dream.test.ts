@@ -238,3 +238,219 @@ test('maybeDream: skips when last dream was <8h ago and same day', async () => {
   expect(result).toEqual({ dreamed: false, reason: 'rate-limited' });
   expect(db.withTransaction).not.toHaveBeenCalled();
 });
+
+test('maybeDream: full happy path — decays, reflects, reinforces, extracts, persists residue', async () => {
+  vi.clearAllMocks();
+  const db = await import('../../src/lib/db.js');
+  const llm = await import('../../src/lib/llm.js');
+
+  const mockClient = { query: vi.fn() };
+  (db.withTransaction as any).mockImplementation(async (fn: any) => fn(mockClient));
+
+  (db.countUnprocessedConversations as any)
+    .mockResolvedValueOnce(2) // trigger-check call (pool)
+    .mockResolvedValueOnce(2); // inside transaction (for cap calc)
+  (db.getLatestDreamRun as any).mockResolvedValue(null);
+
+  const dreamRun = {
+    id: 'dr-1',
+    user_id: 'u1',
+    started_at: new Date(),
+    completed_at: null,
+    conversations_processed: 0,
+    facts_created: 0,
+    facts_reinforced: 0,
+    cap_hit: false,
+    error: null,
+  };
+  (db.insertDreamRun as any).mockResolvedValue(dreamRun);
+
+  (db.getUnprocessedConversations as any).mockResolvedValue([
+    { id: 'c-1', user_id: 'u1', created_at: new Date(), emotional_intensity: null, prediction_error: null, last_dream_at: null },
+    { id: 'c-2', user_id: 'u1', created_at: new Date(), emotional_intensity: null, prediction_error: null, last_dream_at: null },
+  ]);
+
+  const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
+  (db.getAllEntityFacts as any).mockResolvedValue([
+    {
+      id: 'fact-existing',
+      user_id: 'u1',
+      content: 'seems analytical',
+      salience: 0.8,
+      created_at: tenDaysAgo,
+      updated_at: tenDaysAgo,
+      last_reinforced_at: tenDaysAgo,
+    },
+  ]);
+
+  (db.getMessagesForConversation as any).mockResolvedValue([
+    { id: 'm1', conversation_id: 'c-1', user_id: 'u1', role: 'user', content: 'hi', created_at: new Date() },
+    { id: 'm2', conversation_id: 'c-1', user_id: 'u1', role: 'assistant', content: 'hello', created_at: new Date() },
+  ]);
+
+  (db.reinforceFact as any).mockResolvedValue(true);
+
+  const residueRow = {
+    id: 'res-1',
+    dream_run_id: 'dr-1',
+    user_id: 'u1',
+    prose: 'I find myself curious about...',
+    embedding: [0.1, 0.2, 0.3],
+    created_at: new Date(),
+  };
+  (db.insertDreamResidue as any).mockResolvedValue(residueRow);
+
+  // Reflection calls (one per conversation) return JSON; residue call returns prose.
+  (llm.generateResponse as any)
+    .mockResolvedValueOnce(
+      JSON.stringify({
+        new_hypotheses: ['appears to enjoy morning conversations'],
+        reinforced_ids: ['fact-existing'],
+        note: 'Noticed a warmer tone.',
+      }),
+    )
+    .mockResolvedValueOnce(
+      JSON.stringify({
+        new_hypotheses: [],
+        reinforced_ids: ['fact-existing'],
+        note: 'Quieter one.',
+      }),
+    )
+    .mockResolvedValueOnce('I find myself curious about...');
+
+  const { maybeDream } = await import('../../src/lib/dream.js');
+  const result = await maybeDream('u1');
+
+  expect(result.dreamed).toBe(true);
+  if (result.dreamed) {
+    expect(result.residue.prose).toBe('I find myself curious about...');
+    expect(result.capHit).toBe(false);
+  }
+
+  // Decay applied to the existing fact
+  expect(db.updateFactSalience).toHaveBeenCalledWith(
+    'fact-existing',
+    'u1',
+    expect.any(Number),
+    mockClient,
+  );
+
+  // One new hypothesis extracted → upsertEntityFact called once inside the transaction
+  expect(db.upsertEntityFact).toHaveBeenCalledTimes(1);
+  expect(db.upsertEntityFact).toHaveBeenCalledWith(
+    'u1',
+    'appears to enjoy morning conversations',
+    0.7,
+    [0.1, 0.2, 0.3],
+    mockClient,
+  );
+
+  // Two reinforcements (one per conversation)
+  expect(db.reinforceFact).toHaveBeenCalledTimes(2);
+
+  // Conversations marked as dreamed
+  expect(db.markConversationsDreamed).toHaveBeenCalledWith(['c-1', 'c-2'], mockClient);
+
+  // Dream run finalized with correct counts
+  expect(db.finalizeDreamRun).toHaveBeenCalledWith(
+    'dr-1',
+    {
+      conversations_processed: 2,
+      facts_created: 1,
+      facts_reinforced: 2,
+      cap_hit: false,
+      error: null,
+    },
+    mockClient,
+  );
+
+  // Residue persisted
+  expect(db.insertDreamResidue).toHaveBeenCalledWith(
+    'dr-1',
+    'u1',
+    'I find myself curious about...',
+    [0.1, 0.2, 0.3],
+    mockClient,
+  );
+});
+
+test('maybeDream: sets cap_hit when unprocessed count exceeds cap', async () => {
+  const db = await import('../../src/lib/db.js');
+  const llm = await import('../../src/lib/llm.js');
+  vi.clearAllMocks();
+
+  const mockClient = { query: vi.fn() };
+  (db.withTransaction as any).mockImplementation(async (fn: any) => fn(mockClient));
+  (db.countUnprocessedConversations as any).mockResolvedValue(35);
+  (db.getLatestDreamRun as any).mockResolvedValue(null);
+  (db.insertDreamRun as any).mockResolvedValue({
+    id: 'dr-2', user_id: 'u1', started_at: new Date(), completed_at: null,
+    conversations_processed: 0, facts_created: 0, facts_reinforced: 0, cap_hit: false, error: null,
+  });
+  (db.getUnprocessedConversations as any).mockResolvedValue(
+    Array.from({ length: 30 }, (_, i) => ({
+      id: `c-${i}`, user_id: 'u1', created_at: new Date(),
+      emotional_intensity: null, prediction_error: null, last_dream_at: null,
+    })),
+  );
+  (db.getAllEntityFacts as any).mockResolvedValue([]);
+  (db.getMessagesForConversation as any).mockResolvedValue([]);
+  (db.insertDreamResidue as any).mockResolvedValue({
+    id: 'res-2', dream_run_id: 'dr-2', user_id: 'u1',
+    prose: 'p', embedding: null, created_at: new Date(),
+  });
+
+  // All 30 reflections return the same valid JSON; final call returns residue.
+  (llm.generateResponse as any).mockImplementation(async (_sys: string, _msgs: any, opts: any) => {
+    if (opts?.temperature === 1.0) return 'p';
+    return JSON.stringify({ new_hypotheses: [], reinforced_ids: [], note: 'ok' });
+  });
+
+  const { maybeDream } = await import('../../src/lib/dream.js');
+  const result = await maybeDream('u1');
+
+  expect(result.dreamed).toBe(true);
+  if (result.dreamed) expect(result.capHit).toBe(true);
+  expect(db.finalizeDreamRun).toHaveBeenCalledWith(
+    'dr-2',
+    expect.objectContaining({ cap_hit: true, conversations_processed: 30 }),
+    mockClient,
+  );
+});
+
+test('maybeDream: malformed reflection drops that conversation but dream still completes', async () => {
+  const db = await import('../../src/lib/db.js');
+  const llm = await import('../../src/lib/llm.js');
+  vi.clearAllMocks();
+
+  const mockClient = { query: vi.fn() };
+  (db.withTransaction as any).mockImplementation(async (fn: any) => fn(mockClient));
+  (db.countUnprocessedConversations as any).mockResolvedValue(2);
+  (db.getLatestDreamRun as any).mockResolvedValue(null);
+  (db.insertDreamRun as any).mockResolvedValue({
+    id: 'dr-3', user_id: 'u1', started_at: new Date(), completed_at: null,
+    conversations_processed: 0, facts_created: 0, facts_reinforced: 0, cap_hit: false, error: null,
+  });
+  (db.getUnprocessedConversations as any).mockResolvedValue([
+    { id: 'c-good', user_id: 'u1', created_at: new Date(), emotional_intensity: null, prediction_error: null, last_dream_at: null },
+    { id: 'c-bad',  user_id: 'u1', created_at: new Date(), emotional_intensity: null, prediction_error: null, last_dream_at: null },
+  ]);
+  (db.getAllEntityFacts as any).mockResolvedValue([]);
+  (db.getMessagesForConversation as any).mockResolvedValue([]);
+  (db.insertDreamResidue as any).mockResolvedValue({
+    id: 'res-3', dream_run_id: 'dr-3', user_id: 'u1',
+    prose: 'p', embedding: null, created_at: new Date(),
+  });
+
+  (llm.generateResponse as any)
+    .mockResolvedValueOnce(JSON.stringify({ new_hypotheses: [], reinforced_ids: [], note: 'n' }))
+    .mockResolvedValueOnce('totally not json')
+    .mockResolvedValueOnce('p');
+
+  const { maybeDream } = await import('../../src/lib/dream.js');
+  const result = await maybeDream('u1');
+
+  expect(result.dreamed).toBe(true);
+  // Both conversations still marked dreamed — malformed reflection does not block mark.
+  expect(db.markConversationsDreamed).toHaveBeenCalledWith(['c-good', 'c-bad'], mockClient);
+});
