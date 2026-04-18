@@ -1,5 +1,5 @@
 // tests/lib/dream.test.ts
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import { shouldDream, computeDecayedSalience } from '../../src/lib/dream.js';
 
 test('shouldDream: true when unprocessed exist and no prior dream', () => {
@@ -77,4 +77,85 @@ test('computeDecayedSalience: clamps to [0, 1]', () => {
   expect(computeDecayedSalience(1.5, 0)).toBeLessThanOrEqual(1.0);
   expect(computeDecayedSalience(-0.2, 0)).toBeGreaterThanOrEqual(0.0);
   expect(computeDecayedSalience(0.5, 1e6)).toBeGreaterThanOrEqual(0.0);
+});
+
+import type { Message } from '../../src/lib/llm.js';
+import type { EntityFactRow } from '../../src/types/db.js';
+
+function factFixture(partial: Partial<EntityFactRow>): EntityFactRow {
+  return {
+    id: 'fact-1',
+    user_id: 'u1',
+    content: 'seems to value directness',
+    salience: 0.7,
+    created_at: new Date(),
+    updated_at: new Date(),
+    last_reinforced_at: new Date(),
+    ...partial,
+  };
+}
+
+test('reflectOnConversation: parses valid JSON output', async () => {
+  const { reflectOnConversation } = await import('../../src/lib/dream.js');
+  const generate = vi.fn().mockResolvedValue(
+    JSON.stringify({
+      new_hypotheses: ['seems to prefer short answers'],
+      reinforced_ids: ['fact-1'],
+      note: 'Felt calmer in this one.',
+    }),
+  );
+  const messages: Message[] = [
+    { role: 'user', content: 'hi' },
+    { role: 'assistant', content: 'hello' },
+  ];
+  const result = await reflectOnConversation({
+    facts: [factFixture({ id: 'fact-1' })],
+    messages,
+    generate,
+  });
+  expect(result).toEqual({
+    newHypotheses: ['seems to prefer short answers'],
+    reinforcedIds: ['fact-1'],
+    note: 'Felt calmer in this one.',
+  });
+  expect(generate).toHaveBeenCalledTimes(1);
+  const [, , options] = generate.mock.calls[0]!;
+  expect(options).toEqual({ temperature: 0.4 });
+});
+
+test('reflectOnConversation: returns null on malformed JSON', async () => {
+  const { reflectOnConversation } = await import('../../src/lib/dream.js');
+  const generate = vi.fn().mockResolvedValue('not json at all');
+  const result = await reflectOnConversation({
+    facts: [],
+    messages: [{ role: 'user', content: 'x' }],
+    generate,
+  });
+  expect(result).toBeNull();
+});
+
+test('reflectOnConversation: returns null on schema mismatch', async () => {
+  const { reflectOnConversation } = await import('../../src/lib/dream.js');
+  const generate = vi.fn().mockResolvedValue(
+    JSON.stringify({ new_hypotheses: 'should be an array', reinforced_ids: [], note: '' }),
+  );
+  const result = await reflectOnConversation({
+    facts: [],
+    messages: [{ role: 'user', content: 'x' }],
+    generate,
+  });
+  expect(result).toBeNull();
+});
+
+test('reflectOnConversation: tolerates JSON wrapped in markdown code fences', async () => {
+  const { reflectOnConversation } = await import('../../src/lib/dream.js');
+  const generate = vi.fn().mockResolvedValue(
+    '```json\n{"new_hypotheses":["a"],"reinforced_ids":[],"note":"n"}\n```',
+  );
+  const result = await reflectOnConversation({
+    facts: [],
+    messages: [{ role: 'user', content: 'x' }],
+    generate,
+  });
+  expect(result?.newHypotheses).toEqual(['a']);
 });
