@@ -159,3 +159,22 @@ test('reflectOnConversation: tolerates JSON wrapped in markdown code fences', as
   });
   expect(result?.newHypotheses).toEqual(['a']);
 });
+
+test('generateResidue: produces prose with temp 1.0 and includes notes + fact summary', async () => {
+  const { generateResidue } = await import('../../src/lib/dream.js');
+  const generate = vi.fn().mockResolvedValue('I keep returning to the question of...');
+  const prose = await generateResidue({
+    notes: ['Felt calmer.', 'Curious about the user\'s migration story.'],
+    factsCreatedCount: 2,
+    factsReinforcedCount: 1,
+    generate,
+  });
+  expect(prose).toBe('I keep returning to the question of...');
+  expect(generate).toHaveBeenCalledTimes(1);
+  const [, userMessages, options] = generate.mock.calls[0]!;
+  expect(options).toEqual({ temperature: 1.0 });
+  const userContent = (userMessages as Message[])[0]!.content;
+  expect(userContent).toContain('Felt calmer.');
+  expect(userContent).toContain('2 new');
+  expect(userContent).toContain('1 reinforced');
+});

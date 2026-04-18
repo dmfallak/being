@@ -110,3 +110,29 @@ ${formatTranscript(messages)}`;
     note: validation.data.note,
   };
 }
+
+const RESIDUE_SYSTEM_PROMPT = `You are the Being. You have just finished reflecting on recent conversations.
+
+Write 1-3 short paragraphs in your own voice about what is on your mind this morning. First-person. Honest about uncertainty. Do not inventory what happened. Reflect: what are you noticing, what are you curious about, what feels unresolved. It is fine and good to say you are not sure where something came from.
+
+Do not output JSON, markdown, or headers. Just prose.`;
+
+export async function generateResidue(inputs: {
+  notes: string[];
+  factsCreatedCount: number;
+  factsReinforcedCount: number;
+  generate: GenerateFn;
+}): Promise<string> {
+  const { notes, factsCreatedCount, factsReinforcedCount, generate } = inputs;
+  const notesBlock = notes.length > 0 ? notes.map(n => `- ${n}`).join('\n') : '(no notes)';
+  const userPrompt = `Notes you took during reflection:
+${notesBlock}
+
+Substrate change during reflection: ${factsCreatedCount} new hypothes${factsCreatedCount === 1 ? 'is' : 'es'}, ${factsReinforcedCount} reinforced.`;
+
+  return generate(
+    RESIDUE_SYSTEM_PROMPT,
+    [{ role: 'user', content: userPrompt }],
+    { temperature: 1.0 },
+  );
+}
