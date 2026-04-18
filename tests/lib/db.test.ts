@@ -5,7 +5,7 @@ vi.mock('../../src/lib/config.js', () => ({
 }));
 
 vi.mock('pg', () => {
-  const Pool = vi.fn(function() {
+  const Pool = vi.fn(function(this: any) {
     this.query = vi.fn().mockResolvedValue({ rows: [{ val: 1 }] });
   });
   return {

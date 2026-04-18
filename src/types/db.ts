@@ -24,4 +24,26 @@ export type EntityFactRow = {
   salience: number;
   created_at: Date;
   updated_at: Date;
+  last_reinforced_at: Date;
+};
+
+export type DreamRunRow = {
+  id: string;
+  user_id: string;
+  started_at: Date;
+  completed_at: Date | null;
+  conversations_processed: number;
+  facts_created: number;
+  facts_reinforced: number;
+  cap_hit: boolean;
+  error: string | null;
+};
+
+export type DreamResidueRow = {
+  id: string;
+  dream_run_id: string;
+  user_id: string;
+  prose: string;
+  embedding: number[] | null;
+  created_at: Date;
 };
