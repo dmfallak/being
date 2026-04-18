@@ -229,6 +229,7 @@ export async function finalizeDreamRun(
     facts_created: number;
     facts_reinforced: number;
     cap_hit: boolean;
+    parse_failures: number;
     error?: string | null;
   },
   client: pg.PoolClient | pg.Pool = db,
@@ -240,7 +241,8 @@ export async function finalizeDreamRun(
          facts_created = $3,
          facts_reinforced = $4,
          cap_hit = $5,
-         error = $6
+         parse_failures = $6,
+         error = $7
      WHERE id = $1`,
     [
       dreamRunId,
@@ -248,6 +250,7 @@ export async function finalizeDreamRun(
       counts.facts_created,
       counts.facts_reinforced,
       counts.cap_hit,
+      counts.parse_failures,
       counts.error ?? null,
     ],
   );

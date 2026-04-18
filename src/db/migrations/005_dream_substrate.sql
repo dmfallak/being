@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS dream_runs (
   facts_created            int NOT NULL DEFAULT 0,
   facts_reinforced         int NOT NULL DEFAULT 0,
   cap_hit                  boolean NOT NULL DEFAULT false,
+  parse_failures           int NOT NULL DEFAULT 0,
   error                    text
 );
 CREATE INDEX IF NOT EXISTS dream_runs_user_started_idx

@@ -36,6 +36,7 @@ export type DreamRunRow = {
   facts_created: number;
   facts_reinforced: number;
   cap_hit: boolean;
+  parse_failures: number;
   error: string | null;
 };
 

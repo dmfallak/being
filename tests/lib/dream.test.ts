@@ -359,6 +359,7 @@ test('maybeDream: full happy path — decays, reflects, reinforces, extracts, pe
       facts_created: 1,
       facts_reinforced: 2,
       cap_hit: false,
+      parse_failures: 0,
       error: null,
     },
     mockClient,
@@ -453,6 +454,12 @@ test('maybeDream: malformed reflection drops that conversation but dream still c
   expect(result.dreamed).toBe(true);
   // Both conversations still marked dreamed — malformed reflection does not block mark.
   expect(db.markConversationsDreamed).toHaveBeenCalledWith(['c-good', 'c-bad'], mockClient);
+  // The malformed reflection is counted in the audit metadata.
+  expect(db.finalizeDreamRun).toHaveBeenCalledWith(
+    'dr-3',
+    expect.objectContaining({ parse_failures: 1, conversations_processed: 2 }),
+    mockClient,
+  );
 });
 
 test('maybeDream: on pipeline error, records failure and returns non-dreamed outcome', async () => {

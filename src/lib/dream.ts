@@ -219,6 +219,7 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
       const notes: string[] = [];
       let factsCreated = 0;
       let factsReinforced = 0;
+      let parseFailures = 0;
 
       for (const conv of conversations) {
         const messages = await getMessagesForConversation(conv.id, client);
@@ -227,7 +228,10 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
           messages: messages.map(m => ({ role: m.role, content: m.content })),
           generate: retryingGenerate,
         });
-        if (reflection === null) continue;
+        if (reflection === null) {
+          parseFailures++;
+          continue;
+        }
 
         notes.push(reflection.note);
 
@@ -267,6 +271,7 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
           facts_created: factsCreated,
           facts_reinforced: factsReinforced,
           cap_hit: capHit,
+          parse_failures: parseFailures,
           error: null,
         },
         client,
@@ -283,6 +288,7 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
         facts_created: 0,
         facts_reinforced: 0,
         cap_hit: false,
+        parse_failures: 0,
         error: message,
       });
     } catch (auditErr) {
