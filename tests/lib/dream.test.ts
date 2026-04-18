@@ -178,3 +178,63 @@ test('generateResidue: produces prose with temp 1.0 and includes notes + fact su
   expect(userContent).toContain('2 new');
   expect(userContent).toContain('1 reinforced');
 });
+
+vi.mock('../../src/lib/db.js', () => ({
+  withTransaction: vi.fn(),
+  getLatestDreamRun: vi.fn(),
+  getUnprocessedConversations: vi.fn(),
+  countUnprocessedConversations: vi.fn(),
+  getMessagesForConversation: vi.fn(),
+  getAllEntityFacts: vi.fn(),
+  updateFactSalience: vi.fn(),
+  reinforceFact: vi.fn(),
+  insertDreamRun: vi.fn(),
+  finalizeDreamRun: vi.fn(),
+  insertDreamResidue: vi.fn(),
+  markConversationsDreamed: vi.fn(),
+  upsertEntityFact: vi.fn(),
+}));
+
+vi.mock('../../src/lib/embed.js', () => ({
+  embed: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]),
+}));
+
+vi.mock('../../src/lib/llm.js', () => ({
+  generateResponse: vi.fn(),
+}));
+
+test('maybeDream: skips when no unprocessed conversations', async () => {
+  const db = await import('../../src/lib/db.js');
+  (db.countUnprocessedConversations as any).mockResolvedValue(0);
+  (db.getLatestDreamRun as any).mockResolvedValue(null);
+
+  const { maybeDream } = await import('../../src/lib/dream.js');
+  const result = await maybeDream('u1');
+
+  expect(result).toEqual({ dreamed: false, reason: 'no-unprocessed' });
+  expect(db.withTransaction).not.toHaveBeenCalled();
+});
+
+test('maybeDream: skips when last dream was <8h ago and same day', async () => {
+  vi.clearAllMocks();
+  const db = await import('../../src/lib/db.js');
+  (db.countUnprocessedConversations as any).mockResolvedValue(3);
+  const recent = new Date(Date.now() - 2 * 60 * 60 * 1000); // 2h ago
+  (db.getLatestDreamRun as any).mockResolvedValue({
+    id: 'dr-1',
+    user_id: 'u1',
+    started_at: recent,
+    completed_at: recent,
+    conversations_processed: 1,
+    facts_created: 0,
+    facts_reinforced: 0,
+    cap_hit: false,
+    error: null,
+  });
+
+  const { maybeDream } = await import('../../src/lib/dream.js');
+  const result = await maybeDream('u1');
+
+  expect(result).toEqual({ dreamed: false, reason: 'rate-limited' });
+  expect(db.withTransaction).not.toHaveBeenCalled();
+});

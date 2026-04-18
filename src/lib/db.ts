@@ -54,9 +54,10 @@ export async function upsertEntityFact(
   content: string,
   salience: number,
   embedding?: number[],
+  client: pg.PoolClient | pg.Pool = db,
 ): Promise<void> {
   const vectorParam = embedding ? `[${embedding.join(',')}]` : null;
-  await db.query(
+  await client.query(
     `INSERT INTO entity_facts (user_id, content, salience, embedding)
      VALUES ($1, $2, $3, $4::vector)
      ON CONFLICT (user_id, content) DO UPDATE SET updated_at = now()`,

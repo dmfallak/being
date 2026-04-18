@@ -1,7 +1,24 @@
 // src/lib/dream.ts
 import { z } from 'zod';
 import type { Message } from './llm.js';
-import type { EntityFactRow } from '../types/db.js';
+import type { EntityFactRow, DreamResidueRow } from '../types/db.js';
+import {
+  withTransaction,
+  getLatestDreamRun,
+  getUnprocessedConversations,
+  countUnprocessedConversations,
+  getMessagesForConversation,
+  getAllEntityFacts,
+  updateFactSalience,
+  reinforceFact,
+  insertDreamRun,
+  finalizeDreamRun,
+  insertDreamResidue,
+  markConversationsDreamed,
+  upsertEntityFact,
+} from './db.js';
+import { generateResponse } from './llm.js';
+import { embed } from './embed.js';
 
 export const DECAY_FACTOR = 0.98;
 export const MIN_DREAM_GAP_MS = 8 * 60 * 60 * 1000;
@@ -135,4 +152,111 @@ Substrate change during reflection: ${factsCreatedCount} new hypothes${factsCrea
     [{ role: 'user', content: userPrompt }],
     { temperature: 1.0 },
   );
+}
+
+export const CONVERSATIONS_PER_DREAM_CAP = 30;
+
+export type DreamOutcome =
+  | { dreamed: false; reason: 'no-unprocessed' | 'rate-limited' }
+  | { dreamed: true; residue: DreamResidueRow; capHit: boolean };
+
+export async function maybeDream(userId: string, now: Date = new Date()): Promise<DreamOutcome> {
+  const [unprocessedCount, lastDream] = await Promise.all([
+    countUnprocessedConversations(userId),
+    getLatestDreamRun(userId),
+  ]);
+
+  if (!shouldDream({
+    hasUnprocessed: unprocessedCount > 0,
+    lastDreamStartedAt: lastDream?.started_at ?? null,
+    now,
+  })) {
+    return {
+      dreamed: false,
+      reason: unprocessedCount === 0 ? 'no-unprocessed' : 'rate-limited',
+    };
+  }
+
+  return runDream(userId, now);
+}
+
+async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
+  return withTransaction(async (client) => {
+    const dreamRun = await insertDreamRun(userId, now, client);
+
+    const conversations = await getUnprocessedConversations(userId, CONVERSATIONS_PER_DREAM_CAP, client);
+    const totalUnprocessed = await countUnprocessedConversations(userId, client);
+    const capHit = totalUnprocessed > CONVERSATIONS_PER_DREAM_CAP;
+
+    const facts = await getAllEntityFacts(userId, client);
+
+    // Step 2 — decay sweep
+    for (const fact of facts) {
+      const daysSince = (now.getTime() - fact.last_reinforced_at.getTime()) / (24 * 60 * 60 * 1000);
+      const newSalience = computeDecayedSalience(fact.salience, daysSince);
+      await updateFactSalience(fact.id, userId, newSalience, client);
+      fact.salience = newSalience;
+    }
+
+    // Step 3 — per-conversation reflection
+    const notes: string[] = [];
+    let factsCreated = 0;
+    let factsReinforced = 0;
+
+    for (const conv of conversations) {
+      const messages = await getMessagesForConversation(conv.id, client);
+      const reflection = await reflectOnConversation({
+        facts,
+        messages: messages.map(m => ({ role: m.role, content: m.content })),
+        generate: generateResponse,
+      });
+      if (reflection === null) continue;
+
+      notes.push(reflection.note);
+
+      for (const hypothesis of reflection.newHypotheses) {
+        const embedding = await embed(hypothesis).catch(() => undefined);
+        await upsertEntityFact(userId, hypothesis, 0.7, embedding, client);
+        factsCreated++;
+      }
+
+      for (const id of reflection.reinforcedIds) {
+        const ok = await reinforceFact(id, userId, client);
+        if (ok) factsReinforced++;
+      }
+    }
+
+    // Step 4 — residue
+    const prose = await generateResidue({
+      notes,
+      factsCreatedCount: factsCreated,
+      factsReinforcedCount: factsReinforced,
+      generate: generateResponse,
+    });
+    const residueEmbedding = await embed(prose).catch(() => null);
+
+    const residue = await insertDreamResidue(
+      dreamRun.id,
+      userId,
+      prose,
+      residueEmbedding,
+      client,
+    );
+
+    await markConversationsDreamed(conversations.map(c => c.id), client);
+
+    await finalizeDreamRun(
+      dreamRun.id,
+      {
+        conversations_processed: conversations.length,
+        facts_created: factsCreated,
+        facts_reinforced: factsReinforced,
+        cap_hit: capHit,
+        error: null,
+      },
+      client,
+    );
+
+    return { dreamed: true, residue, capHit };
+  });
 }
