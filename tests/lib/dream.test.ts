@@ -454,3 +454,45 @@ test('maybeDream: malformed reflection drops that conversation but dream still c
   // Both conversations still marked dreamed — malformed reflection does not block mark.
   expect(db.markConversationsDreamed).toHaveBeenCalledWith(['c-good', 'c-bad'], mockClient);
 });
+
+test('maybeDream: on pipeline error, records failure and returns non-dreamed outcome', async () => {
+  const db = await import('../../src/lib/db.js');
+  const llm = await import('../../src/lib/llm.js');
+  vi.clearAllMocks();
+
+  const mockClient = { query: vi.fn() };
+  (db.withTransaction as any).mockImplementation(async (fn: any) => fn(mockClient));
+  (db.countUnprocessedConversations as any).mockResolvedValue(1);
+  (db.getLatestDreamRun as any).mockResolvedValue(null);
+  (db.insertDreamRun as any)
+    .mockResolvedValueOnce({
+      id: 'dr-err', user_id: 'u1', started_at: new Date(), completed_at: null,
+      conversations_processed: 0, facts_created: 0, facts_reinforced: 0, cap_hit: false, error: null,
+    })
+    // Second invocation is for the audit row outside the rolled-back transaction.
+    .mockResolvedValueOnce({
+      id: 'dr-audit', user_id: 'u1', started_at: new Date(), completed_at: null,
+      conversations_processed: 0, facts_created: 0, facts_reinforced: 0, cap_hit: false, error: null,
+    });
+  (db.getUnprocessedConversations as any).mockResolvedValue([
+    { id: 'c-x', user_id: 'u1', created_at: new Date(), emotional_intensity: null, prediction_error: null, last_dream_at: null },
+  ]);
+  (db.getAllEntityFacts as any).mockResolvedValue([]);
+  (db.getMessagesForConversation as any).mockResolvedValue([]);
+  // Reflection call fails twice (one retry per spec, then abort).
+  (llm.generateResponse as any)
+    .mockRejectedValueOnce(new Error('boom'))
+    .mockRejectedValueOnce(new Error('boom-retry'));
+
+  const { maybeDream } = await import('../../src/lib/dream.js');
+  const result = await maybeDream('u1');
+
+  expect(result).toEqual({ dreamed: false, reason: 'error' });
+  // Audit row written outside the failed transaction: insertDreamRun called once
+  // inside the tx (for dr-err, rolled back) and once outside (for the audit row).
+  expect(db.insertDreamRun).toHaveBeenCalledTimes(2);
+  expect(db.finalizeDreamRun).toHaveBeenCalledWith(
+    'dr-audit',
+    expect.objectContaining({ error: expect.stringContaining('boom') }),
+  );
+});

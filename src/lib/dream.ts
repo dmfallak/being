@@ -134,22 +134,23 @@ Write 1-3 short paragraphs in your own voice about what is on your mind this mor
 
 Do not output JSON, markdown, or headers. Just prose.`;
 
+function buildResidueUserPrompt(notes: string[], factsCreated: number, factsReinforced: number): string {
+  const notesBlock = notes.length > 0 ? notes.map(n => `- ${n}`).join('\n') : '(no notes)';
+  return `Notes you took during reflection:
+${notesBlock}
+
+Substrate change during reflection: ${factsCreated} new hypothes${factsCreated === 1 ? 'is' : 'es'}, ${factsReinforced} reinforced.`;
+}
+
 export async function generateResidue(inputs: {
   notes: string[];
   factsCreatedCount: number;
   factsReinforcedCount: number;
   generate: GenerateFn;
 }): Promise<string> {
-  const { notes, factsCreatedCount, factsReinforcedCount, generate } = inputs;
-  const notesBlock = notes.length > 0 ? notes.map(n => `- ${n}`).join('\n') : '(no notes)';
-  const userPrompt = `Notes you took during reflection:
-${notesBlock}
-
-Substrate change during reflection: ${factsCreatedCount} new hypothes${factsCreatedCount === 1 ? 'is' : 'es'}, ${factsReinforcedCount} reinforced.`;
-
-  return generate(
+  return inputs.generate(
     RESIDUE_SYSTEM_PROMPT,
-    [{ role: 'user', content: userPrompt }],
+    [{ role: 'user', content: buildResidueUserPrompt(inputs.notes, inputs.factsCreatedCount, inputs.factsReinforcedCount) }],
     { temperature: 1.0 },
   );
 }
@@ -157,7 +158,7 @@ Substrate change during reflection: ${factsCreatedCount} new hypothes${factsCrea
 export const CONVERSATIONS_PER_DREAM_CAP = 30;
 
 export type DreamOutcome =
-  | { dreamed: false; reason: 'no-unprocessed' | 'rate-limited' }
+  | { dreamed: false; reason: 'no-unprocessed' | 'rate-limited' | 'error' }
   | { dreamed: true; residue: DreamResidueRow; capHit: boolean };
 
 export async function maybeDream(userId: string, now: Date = new Date()): Promise<DreamOutcome> {
@@ -180,83 +181,113 @@ export async function maybeDream(userId: string, now: Date = new Date()): Promis
   return runDream(userId, now);
 }
 
+async function generateWithRetry(
+  systemPrompt: string,
+  messages: Message[],
+  options: { temperature?: number } | undefined,
+  generate: GenerateFn,
+): Promise<string> {
+  try {
+    return await generate(systemPrompt, messages, options);
+  } catch {
+    await new Promise(r => setTimeout(r, 1000));
+    return generate(systemPrompt, messages, options);
+  }
+}
+
 async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
-  return withTransaction(async (client) => {
-    const dreamRun = await insertDreamRun(userId, now, client);
+  const retryingGenerate: GenerateFn = (sys, msgs, opts) =>
+    generateWithRetry(sys, msgs, opts, generateResponse);
 
-    const conversations = await getUnprocessedConversations(userId, CONVERSATIONS_PER_DREAM_CAP, client);
-    const totalUnprocessed = await countUnprocessedConversations(userId, client);
-    const capHit = totalUnprocessed > CONVERSATIONS_PER_DREAM_CAP;
+  try {
+    return await withTransaction(async (client) => {
+      const dreamRun = await insertDreamRun(userId, now, client);
 
-    const facts = await getAllEntityFacts(userId, client);
+      const conversations = await getUnprocessedConversations(userId, CONVERSATIONS_PER_DREAM_CAP, client);
+      const totalUnprocessed = await countUnprocessedConversations(userId, client);
+      const capHit = totalUnprocessed > CONVERSATIONS_PER_DREAM_CAP;
 
-    // Step 2 — decay sweep
-    for (const fact of facts) {
-      const daysSince = (now.getTime() - fact.last_reinforced_at.getTime()) / (24 * 60 * 60 * 1000);
-      const newSalience = computeDecayedSalience(fact.salience, daysSince);
-      await updateFactSalience(fact.id, userId, newSalience, client);
-      fact.salience = newSalience;
-    }
+      const facts = await getAllEntityFacts(userId, client);
 
-    // Step 3 — per-conversation reflection
-    const notes: string[] = [];
-    let factsCreated = 0;
-    let factsReinforced = 0;
-
-    for (const conv of conversations) {
-      const messages = await getMessagesForConversation(conv.id, client);
-      const reflection = await reflectOnConversation({
-        facts,
-        messages: messages.map(m => ({ role: m.role, content: m.content })),
-        generate: generateResponse,
-      });
-      if (reflection === null) continue;
-
-      notes.push(reflection.note);
-
-      for (const hypothesis of reflection.newHypotheses) {
-        const embedding = await embed(hypothesis).catch(() => undefined);
-        await upsertEntityFact(userId, hypothesis, 0.7, embedding, client);
-        factsCreated++;
+      for (const fact of facts) {
+        const daysSince = (now.getTime() - fact.last_reinforced_at.getTime()) / (24 * 60 * 60 * 1000);
+        const newSalience = computeDecayedSalience(fact.salience, daysSince);
+        await updateFactSalience(fact.id, userId, newSalience, client);
+        fact.salience = newSalience;
       }
 
-      for (const id of reflection.reinforcedIds) {
-        const ok = await reinforceFact(id, userId, client);
-        if (ok) factsReinforced++;
-      }
-    }
+      const notes: string[] = [];
+      let factsCreated = 0;
+      let factsReinforced = 0;
 
-    // Step 4 — residue
-    const prose = await generateResidue({
-      notes,
-      factsCreatedCount: factsCreated,
-      factsReinforcedCount: factsReinforced,
-      generate: generateResponse,
+      for (const conv of conversations) {
+        const messages = await getMessagesForConversation(conv.id, client);
+        const reflection = await reflectOnConversation({
+          facts,
+          messages: messages.map(m => ({ role: m.role, content: m.content })),
+          generate: retryingGenerate,
+        });
+        if (reflection === null) continue;
+
+        notes.push(reflection.note);
+
+        for (const hypothesis of reflection.newHypotheses) {
+          const embedding = await embed(hypothesis).catch(() => undefined);
+          await upsertEntityFact(userId, hypothesis, 0.7, embedding, client);
+          factsCreated++;
+        }
+
+        for (const id of reflection.reinforcedIds) {
+          const ok = await reinforceFact(id, userId, client);
+          if (ok) factsReinforced++;
+        }
+      }
+
+      const prose = await retryingGenerate(
+        RESIDUE_SYSTEM_PROMPT,
+        [{ role: 'user', content: buildResidueUserPrompt(notes, factsCreated, factsReinforced) }],
+        { temperature: 1.0 },
+      );
+      const residueEmbedding = await embed(prose).catch(() => null);
+
+      const residue = await insertDreamResidue(
+        dreamRun.id,
+        userId,
+        prose,
+        residueEmbedding,
+        client,
+      );
+
+      await markConversationsDreamed(conversations.map(c => c.id), client);
+
+      await finalizeDreamRun(
+        dreamRun.id,
+        {
+          conversations_processed: conversations.length,
+          facts_created: factsCreated,
+          facts_reinforced: factsReinforced,
+          cap_hit: capHit,
+          error: null,
+        },
+        client,
+      );
+
+      return { dreamed: true, residue, capHit };
     });
-    const residueEmbedding = await embed(prose).catch(() => null);
-
-    const residue = await insertDreamResidue(
-      dreamRun.id,
-      userId,
-      prose,
-      residueEmbedding,
-      client,
-    );
-
-    await markConversationsDreamed(conversations.map(c => c.id), client);
-
-    await finalizeDreamRun(
-      dreamRun.id,
-      {
-        conversations_processed: conversations.length,
-        facts_created: factsCreated,
-        facts_reinforced: factsReinforced,
-        cap_hit: capHit,
-        error: null,
-      },
-      client,
-    );
-
-    return { dreamed: true, residue, capHit };
-  });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    try {
+      const auditRun = await insertDreamRun(userId, now);
+      await finalizeDreamRun(auditRun.id, {
+        conversations_processed: 0,
+        facts_created: 0,
+        facts_reinforced: 0,
+        cap_hit: false,
+        error: message,
+      });
+    } catch (auditErr) {
+      console.error('dream: failed to record failure audit row:', auditErr);
+    }
+    return { dreamed: false, reason: 'error' };
+  }
 }
