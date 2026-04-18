@@ -25,3 +25,31 @@ test('generateResponse returns LLM text and calls SDK with correct args', async 
     messages: [{ role: 'user', content: 'What is emergence?' }],
   });
 });
+
+test('generateResponse forwards temperature to generateText when provided', async () => {
+  const { generateText } = await import('ai');
+  const { generateResponse } = await import('../../src/lib/llm.js');
+
+  (generateText as any).mockClear();
+
+  await generateResponse('sys', [{ role: 'user', content: 'hi' }], { temperature: 0.4 });
+
+  expect(generateText).toHaveBeenCalledWith({
+    model: 'mock-model',
+    system: 'sys',
+    messages: [{ role: 'user', content: 'hi' }],
+    temperature: 0.4,
+  });
+});
+
+test('generateResponse omits temperature when not provided', async () => {
+  const { generateText } = await import('ai');
+  const { generateResponse } = await import('../../src/lib/llm.js');
+
+  (generateText as any).mockClear();
+
+  await generateResponse('sys', [{ role: 'user', content: 'hi' }]);
+
+  const call = (generateText as any).mock.calls.at(-1)[0];
+  expect(call).not.toHaveProperty('temperature');
+});
