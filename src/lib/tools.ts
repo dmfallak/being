@@ -9,12 +9,14 @@ const ALCHEMY_TIMEOUT_MS = 30_000;
 export const alchemyTool = tool({
   description: `Run the alchemy lab-notebook CLI. This is your interface to the lab: plan experiments, record measurements, log insights, navigate reasoning history, and search the corpus. The lab persists across sessions.
 
-Pass argv as an array of strings. Use ["--help"] or ["<subcommand>", "--help"] to discover the surface. Add "--json" before the subcommand for machine-readable output. Examples:
+Pass argv as an array of strings. Always run ["<subcommand>", "--help"] first when unsure of the signature — example argv shown below can drift. Add "--json" before the subcommand for machine-readable output. Examples:
 - ["list", "experiments"] — list active experiments
-- ["show", "EXP-001"] — view an experiment (auto-routes by EXP-/TSK-/INS-/LOG- prefix)
+- ["show", "EXP-001"] — view a record (auto-routes by EXP-/TSK-/INS-/LOG- prefix)
 - ["--json", "list", "tasks"]
-- ["plan", "EXP", "short-slug", "--hypothesis=..."] — start an experiment
-- ["measure", "EXP-001", "--key=...", "--value=..."] — record a measurement
+- ["plan", "Measure embedding cache hit rate", "--hypothesis=..."] — title is a single string arg
+- ["measure", "EXP-001", "hit_rate=0.82", "ratio"] — expId, then key=value, then optional unit
+- ["note", "EXP-001", "observation text"] — free-form observation
+- ["conclude", "EXP-001", "outcome text"]
 - ["search", "query text"]`,
   inputSchema: z.object({
     args: z.array(z.string()).describe('Argv passed to the alchemy binary'),
