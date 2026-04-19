@@ -1,7 +1,12 @@
-.PHONY: db run
+.PHONY: db run lab
+
+ALCHEMIST_ROOT := $(CURDIR)/../alchemist
 
 db:
 	docker compose up -d db
 
-run:
-	ALCHEMIST_ROOT=$(CURDIR)/../alchemist npm run migrate && ALCHEMIST_ROOT=$(CURDIR)/../alchemist npx tsx src/cli/index.ts
+lab:
+	$(MAKE) -C $(ALCHEMIST_ROOT) build
+
+run: lab
+	ALCHEMIST_ROOT=$(ALCHEMIST_ROOT) npm run migrate && ALCHEMIST_ROOT=$(ALCHEMIST_ROOT) npx tsx src/cli/index.ts
