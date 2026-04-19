@@ -22,7 +22,6 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://being:being@db:5432/being
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
       ALCHEMIST_ROOT: /alchemist
     volumes:
       - ../alchemist:/alchemist
