@@ -1,14 +1,18 @@
 import { expect, test, vi } from 'vitest';
 
-vi.mock('ai', () => ({
-  generateText: vi.fn().mockResolvedValue({ text: 'I find that fascinating.' }),
-}));
+vi.mock('ai', async () => {
+  const actual = await vi.importActual<typeof import('ai')>('ai');
+  return {
+    ...actual,
+    generateText: vi.fn().mockResolvedValue({ text: 'I find that fascinating.' }),
+  };
+});
 
 vi.mock('@ai-sdk/google', () => ({
   google: vi.fn().mockReturnValue('mock-model'),
 }));
 
-test('generateResponse returns LLM text and calls SDK with correct args', async () => {
+test('generateResponse returns LLM text and passes model, system, messages, tools', async () => {
   const { generateText } = await import('ai');
   const { google } = await import('@ai-sdk/google');
   const { generateResponse } = await import('../../src/lib/llm.js');
@@ -19,11 +23,12 @@ test('generateResponse returns LLM text and calls SDK with correct args', async 
 
   expect(result).toBe('I find that fascinating.');
   expect(google).toHaveBeenCalledWith('gemini-3-flash-preview');
-  expect(generateText).toHaveBeenCalledWith({
-    model: 'mock-model',
-    system: 'You are a scientist.',
-    messages: [{ role: 'user', content: 'What is emergence?' }],
-  });
+  const call = (generateText as any).mock.calls.at(-1)[0];
+  expect(call.model).toBe('mock-model');
+  expect(call.system).toBe('You are a scientist.');
+  expect(call.messages).toEqual([{ role: 'user', content: 'What is emergence?' }]);
+  expect(call.tools).toHaveProperty('alchemy');
+  expect(call).toHaveProperty('stopWhen');
 });
 
 test('generateResponse forwards temperature to generateText when provided', async () => {

@@ -1,11 +1,14 @@
 import { google } from '@ai-sdk/google';
-import { generateText } from 'ai';
+import { generateText, stepCountIs } from 'ai';
+import { alchemyTool } from './tools.js';
 
 export type Message = { role: 'user' | 'assistant'; content: string };
 
 export type GenerateOptions = {
   temperature?: number;
 };
+
+const MAX_TOOL_STEPS = 8;
 
 export async function generateResponse(
   systemPrompt: string,
@@ -16,6 +19,8 @@ export async function generateResponse(
     model: google('gemini-3-flash-preview'),
     system: systemPrompt,
     messages,
+    tools: { alchemy: alchemyTool },
+    stopWhen: stepCountIs(MAX_TOOL_STEPS),
   };
   if (options?.temperature !== undefined) {
     args.temperature = options.temperature;
