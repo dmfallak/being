@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { spawnSync } from 'node:child_process';
 
 const ALCHEMIST_ROOT = process.env.ALCHEMIST_ROOT ?? '/alchemist';
-const ALCHEMIST_CLI = `${ALCHEMIST_ROOT}/src/cli/index.ts`;
+const ALCHEMIST_CLI = `${ALCHEMIST_ROOT}/dist/cli/index.js`;
 const ALCHEMY_TIMEOUT_MS = 30_000;
 
 export const alchemyTool = tool({
@@ -20,7 +20,7 @@ Pass argv as an array of strings. Use ["--help"] or ["<subcommand>", "--help"] t
     args: z.array(z.string()).describe('Argv passed to the alchemy binary'),
   }),
   execute: async ({ args }) => {
-    const result = spawnSync('npx', ['tsx', ALCHEMIST_CLI, ...args], {
+    const result = spawnSync('node', [ALCHEMIST_CLI, ...args], {
       encoding: 'utf8',
       timeout: ALCHEMY_TIMEOUT_MS,
       cwd: ALCHEMIST_ROOT,

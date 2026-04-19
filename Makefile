@@ -4,4 +4,4 @@ db:
 	docker compose up -d db
 
 run:
-	npm run migrate && npx tsx src/cli/index.ts
+	ALCHEMIST_ROOT=$(CURDIR)/../alchemist npm run migrate && ALCHEMIST_ROOT=$(CURDIR)/../alchemist npx tsx src/cli/index.ts

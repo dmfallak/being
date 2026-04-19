@@ -19,8 +19,8 @@ test('alchemyTool execute spawns alchemy CLI with cwd set to ALCHEMIST_ROOT and 
 
   expect(result).toEqual({ stdout: 'EXP-001\n', stderr: '', exitCode: 0 });
   const [cmd, argv, opts] = spawnSyncMock.mock.calls[0];
-  expect(cmd).toBe('npx');
-  expect(argv).toEqual(['tsx', '/tmp/fake-alchemist/src/cli/index.ts', 'list', 'experiments']);
+  expect(cmd).toBe('node');
+  expect(argv).toEqual(['/tmp/fake-alchemist/dist/cli/index.js', 'list', 'experiments']);
   expect(opts.cwd).toBe('/tmp/fake-alchemist');
   expect(opts.encoding).toBe('utf8');
 });
