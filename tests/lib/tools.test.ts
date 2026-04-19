@@ -18,7 +18,8 @@ test('alchemyTool execute spawns alchemy CLI with cwd set to ALCHEMIST_ROOT and 
   const result = await (alchemyTool as any).execute({ args: ['list', 'experiments'] });
 
   expect(result).toEqual({ stdout: 'EXP-001\n', stderr: '', exitCode: 0 });
-  const [cmd, argv, opts] = spawnSyncMock.mock.calls[0];
+  const call = spawnSyncMock.mock.calls[0]!;
+  const [cmd, argv, opts] = call;
   expect(cmd).toBe('node');
   expect(argv).toEqual(['/tmp/fake-alchemist/dist/cli/index.js', 'list', 'experiments']);
   expect(opts.cwd).toBe('/tmp/fake-alchemist');
