@@ -183,7 +183,6 @@ vi.mock('../../src/lib/db.js', () => ({
   reinforceFact: vi.fn(),
   insertDreamRun: vi.fn(),
   finalizeDreamRun: vi.fn(),
-  insertDreamResidue: vi.fn(),
   markConversationsDreamed: vi.fn(),
   upsertEntityFact: vi.fn(),
   getActiveFacts: vi.fn(),

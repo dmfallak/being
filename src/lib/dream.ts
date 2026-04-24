@@ -306,11 +306,12 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
         await insertDreamArtifact(dreamRun.id, userId, type, prose, embedding, client);
       }
 
-      const residueProse = await retryingGenerate(
-        RESIDUE_SYSTEM_PROMPT,
-        [{ role: 'user', content: buildResidueUserPrompt(notes, factsCreated, factsReinforced) }],
-        { temperature: 1.2 },
-      );
+      const residueProse = await generateResidue({
+        notes,
+        factsCreatedCount: factsCreated,
+        factsReinforcedCount: factsReinforced,
+        generate: retryingGenerate,
+      });
       const residueEmbedding = await embed(residueProse).catch(() => null);
       await insertDreamArtifact(dreamRun.id, userId, 'residue', residueProse, residueEmbedding, client);
 

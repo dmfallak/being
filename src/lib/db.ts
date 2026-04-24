@@ -63,7 +63,8 @@ export async function upsertEntityFact(
     `INSERT INTO entity_facts (user_id, content, salience, category, embedding)
      VALUES ($1, $2, $3, $4, $5::vector)
      ON CONFLICT (user_id, content) DO UPDATE
-       SET updated_at = now(), category = EXCLUDED.category`,
+       SET updated_at = now(), category = EXCLUDED.category,
+           embedding = COALESCE(EXCLUDED.embedding, entity_facts.embedding)`,
     [userId, content, salience, category, vectorParam],
   );
 }
@@ -117,19 +118,6 @@ export async function getLatestDreamRun(
     `SELECT * FROM dream_runs
      WHERE user_id = $1 AND completed_at IS NOT NULL
      ORDER BY started_at DESC LIMIT 1`,
-    [userId],
-  );
-  return result.rows[0] ?? null;
-}
-
-export async function getLatestResidue(
-  userId: string,
-  client: pg.PoolClient | pg.Pool = db,
-): Promise<DreamArtifactRow | null> {
-  const result = await client.query<DreamArtifactRow>(
-    `SELECT * FROM dream_artifacts
-     WHERE user_id = $1 AND type = 'residue'
-     ORDER BY created_at DESC LIMIT 1`,
     [userId],
   );
   return result.rows[0] ?? null;
@@ -295,25 +283,6 @@ export async function finalizeDreamRun(
       counts.error ?? null,
     ],
   );
-}
-
-export async function insertDreamResidue(
-  dreamRunId: string,
-  userId: string,
-  prose: string,
-  embedding: number[] | null,
-  client: pg.PoolClient | pg.Pool = db,
-): Promise<DreamArtifactRow> {
-  const vectorParam = embedding ? `[${embedding.join(',')}]` : null;
-  const result = await client.query<DreamArtifactRow>(
-    `INSERT INTO dream_artifacts (dream_run_id, user_id, type, prose, embedding)
-     VALUES ($1, $2, 'residue', $3, $4::vector)
-     RETURNING *`,
-    [dreamRunId, userId, prose, vectorParam],
-  );
-  const row = result.rows[0];
-  if (!row) throw new Error('Failed to insert dream_artifact');
-  return row;
 }
 
 export async function insertDreamArtifact(
