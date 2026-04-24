@@ -6,7 +6,7 @@ import type {
   MessageRow,
   EntityFactRow,
   DreamRunRow,
-  DreamResidueRow,
+  DreamArtifactRow,
 } from '../types/db.js';
 
 const { Pool } = pg;
@@ -122,10 +122,10 @@ export async function getLatestDreamRun(
 export async function getLatestResidue(
   userId: string,
   client: pg.PoolClient | pg.Pool = db,
-): Promise<DreamResidueRow | null> {
-  const result = await client.query<DreamResidueRow>(
-    `SELECT * FROM dream_residues
-     WHERE user_id = $1
+): Promise<DreamArtifactRow | null> {
+  const result = await client.query<DreamArtifactRow>(
+    `SELECT * FROM dream_artifacts
+     WHERE user_id = $1 AND type = 'residue'
      ORDER BY created_at DESC LIMIT 1`,
     [userId],
   );
@@ -262,16 +262,16 @@ export async function insertDreamResidue(
   prose: string,
   embedding: number[] | null,
   client: pg.PoolClient | pg.Pool = db,
-): Promise<DreamResidueRow> {
+): Promise<DreamArtifactRow> {
   const vectorParam = embedding ? `[${embedding.join(',')}]` : null;
-  const result = await client.query<DreamResidueRow>(
-    `INSERT INTO dream_residues (dream_run_id, user_id, prose, embedding)
-     VALUES ($1, $2, $3, $4::vector)
+  const result = await client.query<DreamArtifactRow>(
+    `INSERT INTO dream_artifacts (dream_run_id, user_id, type, prose, embedding)
+     VALUES ($1, $2, 'residue', $3, $4::vector)
      RETURNING *`,
     [dreamRunId, userId, prose, vectorParam],
   );
   const row = result.rows[0];
-  if (!row) throw new Error('Failed to insert dream_residue');
+  if (!row) throw new Error('Failed to insert dream_artifact');
   return row;
 }
 

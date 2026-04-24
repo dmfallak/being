@@ -21,7 +21,9 @@ export type EntityFactRow = {
   id: string;
   user_id: string;
   content: string;
+  category: 'user' | 'world' | 'being';
   salience: number;
+  superseded_at: Date | null;
   created_at: Date;
   updated_at: Date;
   last_reinforced_at: Date;
@@ -40,10 +42,11 @@ export type DreamRunRow = {
   error: string | null;
 };
 
-export type DreamResidueRow = {
+export type DreamArtifactRow = {
   id: string;
   dream_run_id: string;
   user_id: string;
+  type: 'relational_portrait' | 'self_model' | 'world_model' | 'residue';
   prose: string;
   embedding: number[] | null;
   created_at: Date;

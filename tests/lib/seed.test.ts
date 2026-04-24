@@ -1,3 +1,4 @@
+import type { WakingArtifacts } from '../../src/types/artifacts.js';
 import { expect, test } from 'vitest';
 import { buildSystemPrompt } from '../../src/lib/seed.js';
 

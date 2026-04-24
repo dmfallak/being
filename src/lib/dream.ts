@@ -1,7 +1,7 @@
 // src/lib/dream.ts
 import { z } from 'zod';
 import type { Message } from './llm.js';
-import type { EntityFactRow, DreamResidueRow } from '../types/db.js';
+import type { EntityFactRow, DreamArtifactRow } from '../types/db.js';
 import {
   withTransaction,
   getLatestDreamRun,
@@ -159,7 +159,7 @@ export const CONVERSATIONS_PER_DREAM_CAP = 30;
 
 export type DreamOutcome =
   | { dreamed: false; reason: 'no-unprocessed' | 'rate-limited' | 'error' }
-  | { dreamed: true; residue: DreamResidueRow; capHit: boolean };
+  | { dreamed: true; residue: DreamArtifactRow; capHit: boolean };
 
 export async function maybeDream(userId: string, now: Date = new Date()): Promise<DreamOutcome> {
   const [unprocessedCount, lastDream] = await Promise.all([
