@@ -4,7 +4,6 @@ import type { Message } from './llm.js';
 import type { EntityFactRow, DreamArtifactRow } from '../types/db.js';
 import {
   withTransaction,
-  getLatestDreamRun,
   getUnprocessedConversations,
   countUnprocessedConversations,
   getMessagesForConversation,
@@ -13,7 +12,6 @@ import {
   reinforceFact,
   insertDreamRun,
   finalizeDreamRun,
-  insertDreamResidue,
   markConversationsDreamed,
   upsertEntityFact,
   supersedeEntityFact,
@@ -302,11 +300,7 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
       ];
 
       for (const { type, inputFacts } of portraitDefs) {
-        const prose = await retryingGenerate(
-          PORTRAIT_PROMPTS[type],
-          [{ role: 'user', content: inputFacts.length > 0 ? `Facts:\n${inputFacts.map(f => `- ${f}`).join('\n')}` : '(no facts yet)' }],
-          { temperature: 0.6 },
-        ).catch(() => null);
+        const prose = await generatePortrait(type, inputFacts, retryingGenerate).catch(() => null);
         if (!prose) continue;
         const embedding = await embed(prose).catch(() => null);
         await insertDreamArtifact(dreamRun.id, userId, type, prose, embedding, client);
