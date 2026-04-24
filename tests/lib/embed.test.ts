@@ -15,5 +15,5 @@ test('embed returns a number array', async () => {
   const result = await embed('hello world');
   expect(Array.isArray(result)).toBe(true);
   expect(result[0]).toBeTypeOf('number');
-  expect(google.textEmbeddingModel).toHaveBeenCalledWith('text-embedding-004');
+  expect(google.textEmbeddingModel).toHaveBeenCalledWith('gemini-embedding-001');
 });
