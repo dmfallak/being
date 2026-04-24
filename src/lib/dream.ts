@@ -21,20 +21,13 @@ import { generateResponse } from './llm.js';
 import { embed } from './embed.js';
 
 export const DECAY_FACTOR = 0.98;
-export const MIN_DREAM_GAP_MS = 8 * 60 * 60 * 1000;
 
 export type ShouldDreamInputs = {
   hasUnprocessed: boolean;
-  lastDreamStartedAt: Date | null;
-  now: Date;
 };
 
 export function shouldDream(inputs: ShouldDreamInputs): boolean {
-  const { hasUnprocessed, lastDreamStartedAt, now } = inputs;
-  if (!hasUnprocessed) return false;
-  if (lastDreamStartedAt === null) return true;
-  const elapsedMs = now.getTime() - lastDreamStartedAt.getTime();
-  return elapsedMs >= MIN_DREAM_GAP_MS;
+  return inputs.hasUnprocessed;
 }
 
 export function computeDecayedSalience(oldSalience: number, daysSince: number): number {
@@ -158,24 +151,14 @@ export async function generateResidue(inputs: {
 export const CONVERSATIONS_PER_DREAM_CAP = 30;
 
 export type DreamOutcome =
-  | { dreamed: false; reason: 'no-unprocessed' | 'rate-limited' | 'error' }
-  | { dreamed: true; residue: DreamArtifactRow; capHit: boolean };
+  | { dreamed: false; reason: 'no-unprocessed' | 'error' }
+  | { dreamed: true; capHit: boolean };
 
 export async function maybeDream(userId: string, now: Date = new Date()): Promise<DreamOutcome> {
-  const [unprocessedCount, lastDream] = await Promise.all([
-    countUnprocessedConversations(userId),
-    getLatestDreamRun(userId),
-  ]);
+  const unprocessedCount = await countUnprocessedConversations(userId);
 
-  if (!shouldDream({
-    hasUnprocessed: unprocessedCount > 0,
-    lastDreamStartedAt: lastDream?.started_at ?? null,
-    now,
-  })) {
-    return {
-      dreamed: false,
-      reason: unprocessedCount === 0 ? 'no-unprocessed' : 'rate-limited',
-    };
+  if (!shouldDream({ hasUnprocessed: unprocessedCount > 0 })) {
+    return { dreamed: false, reason: 'no-unprocessed' };
   }
 
   return runDream(userId, now);

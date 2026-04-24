@@ -2,66 +2,12 @@
 import { expect, test, vi } from 'vitest';
 import { shouldDream, computeDecayedSalience } from '../../src/lib/dream.js';
 
-test('shouldDream: true when unprocessed exist and no prior dream', () => {
-  const now = new Date('2026-04-17T09:00:00Z');
-  expect(shouldDream({ hasUnprocessed: true, lastDreamStartedAt: null, now })).toBe(true);
+test('shouldDream: true when unprocessed conversations exist', () => {
+  expect(shouldDream({ hasUnprocessed: true })).toBe(true);
 });
 
 test('shouldDream: false when no unprocessed conversations', () => {
-  const now = new Date('2026-04-17T09:00:00Z');
-  expect(
-    shouldDream({
-      hasUnprocessed: false,
-      lastDreamStartedAt: new Date('2026-04-16T00:00:00Z'),
-      now,
-    }),
-  ).toBe(false);
-});
-
-test('shouldDream: true when last dream was on a prior calendar day AND >=8h ago', () => {
-  const now = new Date('2026-04-17T00:30:00Z');
-  expect(
-    shouldDream({
-      hasUnprocessed: true,
-      lastDreamStartedAt: new Date('2026-04-16T14:00:00Z'),
-      now,
-    }),
-  ).toBe(true);
-});
-
-test('shouldDream: false when last dream was earlier today and <8h ago', () => {
-  const now = new Date('2026-04-17T14:00:00Z');
-  expect(
-    shouldDream({
-      hasUnprocessed: true,
-      lastDreamStartedAt: new Date('2026-04-17T09:00:00Z'),
-      now,
-    }),
-  ).toBe(false);
-});
-
-test('shouldDream: true when >=8h elapsed even within same calendar day', () => {
-  const now = new Date('2026-04-17T22:00:00Z');
-  expect(
-    shouldDream({
-      hasUnprocessed: true,
-      lastDreamStartedAt: new Date('2026-04-17T13:00:00Z'),
-      now,
-    }),
-  ).toBe(true);
-});
-
-test('shouldDream: false across midnight when <8h gap (prevents re-trigger)', () => {
-  // 11pm yesterday → 12:15am today: prior calendar day but only 1h15m elapsed.
-  // We must NOT re-trigger on the midnight edge.
-  const now = new Date('2026-04-17T00:15:00Z');
-  expect(
-    shouldDream({
-      hasUnprocessed: true,
-      lastDreamStartedAt: new Date('2026-04-16T23:00:00Z'),
-      now,
-    }),
-  ).toBe(false);
+  expect(shouldDream({ hasUnprocessed: false })).toBe(false);
 });
 
 test('computeDecayedSalience: identity at zero days', () => {
@@ -206,38 +152,14 @@ vi.mock('../../src/lib/llm.js', () => ({
 }));
 
 test('maybeDream: skips when no unprocessed conversations', async () => {
+  vi.clearAllMocks();
   const db = await import('../../src/lib/db.js');
   (db.countUnprocessedConversations as any).mockResolvedValue(0);
-  (db.getLatestDreamRun as any).mockResolvedValue(null);
 
   const { maybeDream } = await import('../../src/lib/dream.js');
   const result = await maybeDream('u1');
 
   expect(result).toEqual({ dreamed: false, reason: 'no-unprocessed' });
-  expect(db.withTransaction).not.toHaveBeenCalled();
-});
-
-test('maybeDream: skips when last dream was <8h ago and same day', async () => {
-  vi.clearAllMocks();
-  const db = await import('../../src/lib/db.js');
-  (db.countUnprocessedConversations as any).mockResolvedValue(3);
-  const recent = new Date(Date.now() - 2 * 60 * 60 * 1000); // 2h ago
-  (db.getLatestDreamRun as any).mockResolvedValue({
-    id: 'dr-1',
-    user_id: 'u1',
-    started_at: recent,
-    completed_at: recent,
-    conversations_processed: 1,
-    facts_created: 0,
-    facts_reinforced: 0,
-    cap_hit: false,
-    error: null,
-  });
-
-  const { maybeDream } = await import('../../src/lib/dream.js');
-  const result = await maybeDream('u1');
-
-  expect(result).toEqual({ dreamed: false, reason: 'rate-limited' });
   expect(db.withTransaction).not.toHaveBeenCalled();
 });
 
