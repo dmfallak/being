@@ -16,6 +16,7 @@ import {
   insertDreamResidue,
   markConversationsDreamed,
   upsertEntityFact,
+  supersedeEntityFact,
 } from './db.js';
 import { generateResponse } from './llm.js';
 import { embed } from './embed.js';
@@ -37,15 +38,22 @@ export function computeDecayedSalience(oldSalience: number, daysSince: number): 
   return Math.max(0, Math.min(1, decayed));
 }
 
+const HypothesisSchema = z.object({
+  content: z.string(),
+  category: z.enum(['user', 'world', 'being']),
+});
+
 const ReflectionSchema = z.object({
-  new_hypotheses: z.array(z.string()),
+  new_hypotheses: z.array(HypothesisSchema),
   reinforced_ids: z.array(z.string()),
+  superseded_old_ids: z.array(z.string()),
   note: z.string(),
 });
 
 export type ReflectionResult = {
-  newHypotheses: string[];
+  newHypotheses: Array<{ content: string; category: 'user' | 'world' | 'being' }>;
   reinforcedIds: string[];
+  supersededOldIds: string[];
   note: string;
 };
 
@@ -59,10 +67,11 @@ const REFLECTION_SYSTEM_PROMPT = `You are reflecting on a past conversation with
 
 You will be given a list of current hypotheses about this user, and a conversation transcript.
 
-Output JSON with exactly three fields:
-- "new_hypotheses": array of strings. Factual hypotheses about the user that were not captured in the existing list. Use hedged language ("seems", "appears", "mentioned"). Only include observations likely to matter in future conversations. May be an empty array.
-- "reinforced_ids": array of strings. IDs (from the existing list) that this conversation provides independent evidence for. Only include IDs that actually appear in the existing list.
-- "note": string. One or two sentences, first-person, on what was notable about this conversation on reflection. For your own records.
+Output JSON with exactly four fields:
+- "new_hypotheses": array of objects with "content" (hedged hypothesis string) and "category" ("user" for observations about this person, "world" for observations about external reality, "being" for observations about yourself). Only include observations likely to matter in future conversations. May be empty.
+- "reinforced_ids": array of IDs from the existing list that this conversation provides independent evidence for.
+- "superseded_old_ids": array of IDs from the existing list that are contradicted or replaced by new information in this conversation. Only include IDs where you are confident the old fact is no longer accurate.
+- "note": one or two sentences, first-person, on what was notable about this conversation on reflection.
 
 Output ONLY the JSON object. No prose, no markdown fences.`;
 
@@ -117,6 +126,7 @@ ${formatTranscript(messages)}`;
   return {
     newHypotheses: validation.data.new_hypotheses,
     reinforcedIds: validation.data.reinforced_ids,
+    supersededOldIds: validation.data.superseded_old_ids,
     note: validation.data.note,
   };
 }
@@ -219,9 +229,13 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
         notes.push(reflection.note);
 
         for (const hypothesis of reflection.newHypotheses) {
-          const embedding = await embed(hypothesis).catch(() => undefined);
-          await upsertEntityFact(userId, hypothesis, 0.7, embedding, client);
+          const embedding = await embed(hypothesis.content).catch(() => undefined);
+          await upsertEntityFact(userId, hypothesis.content, 0.7, hypothesis.category, embedding, client);
           factsCreated++;
+        }
+
+        for (const oldId of reflection.supersededOldIds) {
+          await supersedeEntityFact(oldId, userId, client).catch(() => {});
         }
 
         for (const id of reflection.reinforcedIds) {

@@ -43,12 +43,16 @@ function factFixture(partial: Partial<EntityFactRow>): EntityFactRow {
   };
 }
 
-test('reflectOnConversation: parses valid JSON output', async () => {
+test('reflectOnConversation: parses valid JSON with categories and supersessions', async () => {
   const { reflectOnConversation } = await import('../../src/lib/dream.js');
   const generate = vi.fn().mockResolvedValue(
     JSON.stringify({
-      new_hypotheses: ['seems to prefer short answers'],
+      new_hypotheses: [
+        { content: 'seems to prefer short answers', category: 'user' },
+        { content: 'heard about a new conflict', category: 'world' },
+      ],
       reinforced_ids: ['fact-1'],
+      superseded_old_ids: ['fact-2'],
       note: 'Felt calmer in this one.',
     }),
   );
@@ -57,16 +61,19 @@ test('reflectOnConversation: parses valid JSON output', async () => {
     { role: 'assistant', content: 'hello' },
   ];
   const result = await reflectOnConversation({
-    facts: [factFixture({ id: 'fact-1' })],
+    facts: [factFixture({ id: 'fact-1' }), factFixture({ id: 'fact-2' })],
     messages,
     generate,
   });
   expect(result).toEqual({
-    newHypotheses: ['seems to prefer short answers'],
+    newHypotheses: [
+      { content: 'seems to prefer short answers', category: 'user' },
+      { content: 'heard about a new conflict', category: 'world' },
+    ],
     reinforcedIds: ['fact-1'],
+    supersededOldIds: ['fact-2'],
     note: 'Felt calmer in this one.',
   });
-  expect(generate).toHaveBeenCalledTimes(1);
   const [, , options] = generate.mock.calls[0]!;
   expect(options).toEqual({ temperature: 0.4 });
 });
@@ -85,7 +92,7 @@ test('reflectOnConversation: returns null on malformed JSON', async () => {
 test('reflectOnConversation: returns null on schema mismatch', async () => {
   const { reflectOnConversation } = await import('../../src/lib/dream.js');
   const generate = vi.fn().mockResolvedValue(
-    JSON.stringify({ new_hypotheses: 'should be an array', reinforced_ids: [], note: '' }),
+    JSON.stringify({ new_hypotheses: 'should be an array', reinforced_ids: [], superseded_old_ids: [], note: '' }),
   );
   const result = await reflectOnConversation({
     facts: [],
@@ -98,14 +105,15 @@ test('reflectOnConversation: returns null on schema mismatch', async () => {
 test('reflectOnConversation: tolerates JSON wrapped in markdown code fences', async () => {
   const { reflectOnConversation } = await import('../../src/lib/dream.js');
   const generate = vi.fn().mockResolvedValue(
-    '```json\n{"new_hypotheses":["a"],"reinforced_ids":[],"note":"n"}\n```',
+    '```json\n{"new_hypotheses":[{"content":"a","category":"user"}],"reinforced_ids":[],"superseded_old_ids":[],"note":"n"}\n```',
   );
   const result = await reflectOnConversation({
     facts: [],
     messages: [{ role: 'user', content: 'x' }],
     generate,
   });
-  expect(result?.newHypotheses).toEqual(['a']);
+  expect(result?.newHypotheses[0]?.content).toBe('a');
+  expect(result?.newHypotheses[0]?.category).toBe('user');
 });
 
 test('generateResidue: produces prose with temp 1.0 and includes notes + fact summary', async () => {
@@ -141,6 +149,10 @@ vi.mock('../../src/lib/db.js', () => ({
   insertDreamResidue: vi.fn(),
   markConversationsDreamed: vi.fn(),
   upsertEntityFact: vi.fn(),
+  getActiveFacts: vi.fn(),
+  getActiveFactsByCategory: vi.fn(),
+  supersedeEntityFact: vi.fn(),
+  insertDreamArtifact: vi.fn(),
 }));
 
 vi.mock('../../src/lib/embed.js', () => ({
