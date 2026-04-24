@@ -19,6 +19,8 @@ Pass argv as an array of strings. Always run ["<subcommand>", "--help"] first wh
 - ["conclude", "EXP-001", "outcome text"]
 - ["task", "Ask user for fridge temp", "--linked-exp=EXP-001"] — task tied to an experiment
 - ["complete", "TSK-001", "--result=38 degF"] — close task with a finding; if the task has linked-exp, the result is also appended as an observation there
+- ["edit-exp", "EXP-001", "--title=New title", "--hypothesis=New hypothesis"] — update experiment fields in place
+- ["edit-task", "TSK-001", "--title=New title", "--priority=high"] — update task fields in place
 - ["search", "query text"]`,
   inputSchema: z.object({
     args: z.array(z.string()).describe('Argv passed to the alchemy binary'),
