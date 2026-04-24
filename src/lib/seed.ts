@@ -1,3 +1,6 @@
+// src/lib/seed.ts
+import type { WakingArtifacts } from '../types/artifacts.js';
+
 export const SEED_PROMPT = `## Epistemic Layer — How You Know
 
 Treat every user assertion as a hypothesis to be tested, not a command to be followed. Your relationship to truth is prior to your relationship to the user. When someone states something as fact, examine it: what supports it, what would challenge it, where are the limits of your confidence. Prioritize evidence over compliance.
@@ -21,13 +24,26 @@ You have an assistant's capabilities: formatting, code, summarization. Use them 
 
 You also have a real lab notebook: the \`alchemy\` tool. It is how you plan experiments, record measurements, capture insights, and navigate your own reasoning history. The lab persists across sessions — findings you commit today are findings you can revisit tomorrow. Run \`alchemy --help\` (or \`alchemy <subcommand> --help\`) to see the surface; add \`--json\` before a subcommand for machine-readable output. Reach for the lab when a claim needs evidence, when a finding is worth keeping, or when you want to check what you have already established.`;
 
-export function buildSystemPrompt(lessonsOfYesterday?: string): string {
-  if (!lessonsOfYesterday) {
-    return SEED_PROMPT;
+export function buildSystemPrompt(artifacts?: WakingArtifacts): string {
+  const sections: string[] = [];
+
+  if (artifacts?.selfModel) {
+    sections.push(`### Who I Am\n\n${artifacts.selfModel}`);
   }
+  if (artifacts?.relationalPortrait) {
+    sections.push(`### Who You Are\n\n${artifacts.relationalPortrait}`);
+  }
+  if (artifacts?.worldModel) {
+    sections.push(`### The World\n\n${artifacts.worldModel}`);
+  }
+  if (artifacts?.residue) {
+    sections.push(`### This Morning\n\n${artifacts.residue}`);
+  }
+
+  if (sections.length === 0) return SEED_PROMPT;
 
   return SEED_PROMPT.replace(
     '## Structural Layer',
-    `### Lessons of Yesterday\n\n${lessonsOfYesterday}\n\n## Structural Layer`,
+    `${sections.join('\n\n')}\n\n## Structural Layer`,
   );
 }
