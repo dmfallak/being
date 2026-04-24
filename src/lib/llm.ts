@@ -20,6 +20,7 @@ export async function generateResponse(
     system: systemPrompt,
     messages,
     tools: { alchemy: alchemyTool },
+    maxSteps: MAX_TOOL_STEPS,
     stopWhen: stepCountIs(MAX_TOOL_STEPS),
   };
   if (options?.temperature !== undefined) {

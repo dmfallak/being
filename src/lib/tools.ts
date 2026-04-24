@@ -1,8 +1,11 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { resolve, dirname } from 'node:path';
 
-const ALCHEMIST_ROOT = process.env.ALCHEMIST_ROOT ?? '/alchemist';
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ALCHEMIST_ROOT = process.env.ALCHEMIST_ROOT ?? resolve(__dirname, '../../../alchemist');
 const ALCHEMIST_CLI = `${ALCHEMIST_ROOT}/dist/cli/index.js`;
 const ALCHEMY_TIMEOUT_MS = 30_000;
 
