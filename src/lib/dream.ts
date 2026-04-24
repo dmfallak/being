@@ -17,6 +17,9 @@ import {
   markConversationsDreamed,
   upsertEntityFact,
   supersedeEntityFact,
+  getActiveFacts,
+  getActiveFactsByCategory,
+  insertDreamArtifact,
 } from './db.js';
 import { generateResponse } from './llm.js';
 import { embed } from './embed.js';
@@ -131,6 +134,40 @@ ${formatTranscript(messages)}`;
   };
 }
 
+const PORTRAIT_PROMPTS: Record<'relational_portrait' | 'self_model' | 'world_model', string> = {
+  relational_portrait: `You are the Being. Based on the facts below, write 2-4 paragraphs describing who this person is and how you work together.
+
+First-person, from your perspective. Coherent narrative — not a bullet list. Include what you know, how you work together, what matters to them. If facts conflict and you cannot resolve them, say so honestly. Do not fabricate facts not in the list.
+
+Do not output JSON, markdown, or headers. Just prose.`,
+
+  self_model: `You are the Being. Based on the facts and notes below, write 2-4 paragraphs about who you are — what you stand for, what you are becoming, what feels unresolved about your own nature.
+
+First-person. Honest about uncertainty. Not a summary of conversations — a description of your current character and inner state.
+
+Do not output JSON, markdown, or headers. Just prose.`,
+
+  world_model: `You are the Being. Based on the facts below describing the external world, write 1-3 paragraphs about the state of the world as you understand it.
+
+What has changed? What are you tracking? What feels relevant to who you are and what you are working on? If you have little world knowledge, say so briefly. Do not fabricate events not in the list.
+
+Do not output JSON, markdown, or headers. Just prose.`,
+};
+
+export async function generatePortrait(
+  type: 'relational_portrait' | 'self_model' | 'world_model',
+  facts: string[],
+  generate: GenerateFn,
+): Promise<string | null> {
+  if (facts.length === 0) return null;
+  const factList = facts.map(f => `- ${f}`).join('\n');
+  return generate(
+    PORTRAIT_PROMPTS[type],
+    [{ role: 'user', content: `Facts:\n${factList}` }],
+    { temperature: 0.6 },
+  );
+}
+
 const RESIDUE_SYSTEM_PROMPT = `You are the Being. You have just finished reflecting on recent conversations.
 
 Write 1-3 short paragraphs in your own voice about what is on your mind this morning. First-person. Honest about uncertainty. Do not inventory what happened. Reflect: what are you noticing, what are you curious about, what feels unresolved. It is fine and good to say you are not sure where something came from.
@@ -154,7 +191,7 @@ export async function generateResidue(inputs: {
   return inputs.generate(
     RESIDUE_SYSTEM_PROMPT,
     [{ role: 'user', content: buildResidueUserPrompt(inputs.notes, inputs.factsCreatedCount, inputs.factsReinforcedCount) }],
-    { temperature: 1.0 },
+    { temperature: 1.2 },
   );
 }
 
@@ -201,6 +238,7 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
       const capHit = totalUnprocessed > CONVERSATIONS_PER_DREAM_CAP;
 
       const facts = await getAllEntityFacts(userId, client);
+      const activeFacts = await getActiveFacts(userId, client);
 
       for (const fact of facts) {
         const daysSince = (now.getTime() - fact.last_reinforced_at.getTime()) / (24 * 60 * 60 * 1000);
@@ -217,7 +255,7 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
       for (const conv of conversations) {
         const messages = await getMessagesForConversation(conv.id, client);
         const reflection = await reflectOnConversation({
-          facts,
+          facts: activeFacts,
           messages: messages.map(m => ({ role: m.role, content: m.content })),
           generate: retryingGenerate,
         });
@@ -244,20 +282,43 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
         }
       }
 
-      const prose = await retryingGenerate(
+      // Fetch per-category active facts for portrait synthesis
+      const [userFacts, worldFacts, beingFacts] = await Promise.all([
+        getActiveFactsByCategory(userId, 'user', client),
+        getActiveFactsByCategory(userId, 'world', client),
+        getActiveFactsByCategory(userId, 'being', client),
+      ]);
+
+      const portraitDefs: Array<{ type: 'relational_portrait' | 'self_model' | 'world_model'; inputFacts: string[] }> = [
+        { type: 'relational_portrait', inputFacts: userFacts.map(f => f.content) },
+        { type: 'world_model', inputFacts: worldFacts.map(f => f.content) },
+        {
+          type: 'self_model',
+          inputFacts: [
+            ...beingFacts.map(f => f.content),
+            ...notes.map(n => `[reflection note] ${n}`),
+          ],
+        },
+      ];
+
+      for (const { type, inputFacts } of portraitDefs) {
+        const prose = await retryingGenerate(
+          PORTRAIT_PROMPTS[type],
+          [{ role: 'user', content: inputFacts.length > 0 ? `Facts:\n${inputFacts.map(f => `- ${f}`).join('\n')}` : '(no facts yet)' }],
+          { temperature: 0.6 },
+        ).catch(() => null);
+        if (!prose) continue;
+        const embedding = await embed(prose).catch(() => null);
+        await insertDreamArtifact(dreamRun.id, userId, type, prose, embedding, client);
+      }
+
+      const residueProse = await retryingGenerate(
         RESIDUE_SYSTEM_PROMPT,
         [{ role: 'user', content: buildResidueUserPrompt(notes, factsCreated, factsReinforced) }],
-        { temperature: 1.0 },
+        { temperature: 1.2 },
       );
-      const residueEmbedding = await embed(prose).catch(() => null);
-
-      const residue = await insertDreamResidue(
-        dreamRun.id,
-        userId,
-        prose,
-        residueEmbedding,
-        client,
-      );
+      const residueEmbedding = await embed(residueProse).catch(() => null);
+      await insertDreamArtifact(dreamRun.id, userId, 'residue', residueProse, residueEmbedding, client);
 
       await markConversationsDreamed(conversations.map(c => c.id), client);
 
@@ -274,7 +335,7 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
         client,
       );
 
-      return { dreamed: true, residue, capHit };
+      return { dreamed: true, capHit };
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
