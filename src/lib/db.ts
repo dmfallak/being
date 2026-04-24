@@ -8,6 +8,7 @@ import type {
   DreamRunRow,
   DreamArtifactRow,
 } from '../types/db.js';
+import type { WakingArtifacts } from '../types/artifacts.js';
 
 const { Pool } = pg;
 export const db = new Pool({ connectionString: config.DATABASE_URL });
@@ -53,15 +54,17 @@ export async function upsertEntityFact(
   userId: string,
   content: string,
   salience: number,
+  category: 'user' | 'world' | 'being' = 'user',
   embedding?: number[],
   client: pg.PoolClient | pg.Pool = db,
 ): Promise<void> {
   const vectorParam = embedding ? `[${embedding.join(',')}]` : null;
   await client.query(
-    `INSERT INTO entity_facts (user_id, content, salience, embedding)
-     VALUES ($1, $2, $3, $4::vector)
-     ON CONFLICT (user_id, content) DO UPDATE SET updated_at = now()`,
-    [userId, content, salience, vectorParam],
+    `INSERT INTO entity_facts (user_id, content, salience, category, embedding)
+     VALUES ($1, $2, $3, $4, $5::vector)
+     ON CONFLICT (user_id, content) DO UPDATE
+       SET updated_at = now(), category = EXCLUDED.category`,
+    [userId, content, salience, category, vectorParam],
   );
 }
 
@@ -180,6 +183,32 @@ export async function getAllEntityFacts(
   return result.rows;
 }
 
+export async function getActiveFacts(
+  userId: string,
+  client: pg.PoolClient | pg.Pool = db,
+): Promise<EntityFactRow[]> {
+  const result = await client.query<EntityFactRow>(
+    `SELECT * FROM entity_facts
+     WHERE user_id = $1 AND superseded_at IS NULL`,
+    [userId],
+  );
+  return result.rows;
+}
+
+export async function getActiveFactsByCategory(
+  userId: string,
+  category: 'user' | 'world' | 'being',
+  client: pg.PoolClient | pg.Pool = db,
+): Promise<EntityFactRow[]> {
+  const result = await client.query<EntityFactRow>(
+    `SELECT * FROM entity_facts
+     WHERE user_id = $1 AND category = $2 AND superseded_at IS NULL
+     ORDER BY salience DESC`,
+    [userId, category],
+  );
+  return result.rows;
+}
+
 export async function updateFactSalience(
   factId: string,
   userId: string,
@@ -206,6 +235,18 @@ export async function reinforceFact(
     [factId, userId],
   );
   return (result.rowCount ?? 0) > 0;
+}
+
+export async function supersedeEntityFact(
+  factId: string,
+  userId: string,
+  client: pg.PoolClient | pg.Pool = db,
+): Promise<void> {
+  await client.query(
+    `UPDATE entity_facts SET superseded_at = now()
+     WHERE id = $1 AND user_id = $2`,
+    [factId, userId],
+  );
 }
 
 export async function insertDreamRun(
@@ -273,6 +314,47 @@ export async function insertDreamResidue(
   const row = result.rows[0];
   if (!row) throw new Error('Failed to insert dream_artifact');
   return row;
+}
+
+export async function insertDreamArtifact(
+  dreamRunId: string,
+  userId: string,
+  type: 'relational_portrait' | 'self_model' | 'world_model' | 'residue',
+  prose: string,
+  embedding: number[] | null,
+  client: pg.PoolClient | pg.Pool = db,
+): Promise<DreamArtifactRow> {
+  const vectorParam = embedding ? `[${embedding.join(',')}]` : null;
+  const result = await client.query<DreamArtifactRow>(
+    `INSERT INTO dream_artifacts (dream_run_id, user_id, type, prose, embedding)
+     VALUES ($1, $2, $3, $4, $5::vector)
+     RETURNING *`,
+    [dreamRunId, userId, type, prose, vectorParam],
+  );
+  const row = result.rows[0];
+  if (!row) throw new Error('Failed to insert dream_artifact');
+  return row;
+}
+
+export async function getLatestArtifacts(
+  userId: string,
+  client: pg.PoolClient | pg.Pool = db,
+): Promise<WakingArtifacts> {
+  const result = await client.query<DreamArtifactRow>(
+    `SELECT DISTINCT ON (type) *
+     FROM dream_artifacts
+     WHERE user_id = $1
+     ORDER BY type, created_at DESC`,
+    [userId],
+  );
+  const artifacts: WakingArtifacts = {};
+  for (const row of result.rows) {
+    if (row.type === 'relational_portrait') artifacts.relationalPortrait = row.prose;
+    else if (row.type === 'self_model') artifacts.selfModel = row.prose;
+    else if (row.type === 'world_model') artifacts.worldModel = row.prose;
+    else if (row.type === 'residue') artifacts.residue = row.prose;
+  }
+  return artifacts;
 }
 
 export async function markConversationsDreamed(
