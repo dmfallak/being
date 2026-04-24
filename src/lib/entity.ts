@@ -4,16 +4,24 @@ import { embed } from './embed.js';
 import { upsertEntityFact } from './db.js';
 import type { Message } from './llm.js';
 
-const EXTRACTION_PROMPT = `You are analysing a conversation to extract factual hypotheses about the user.
-Output a bullet list of concise hypotheses, one per line, starting with "- ".
-These are provisional observations, not conclusions. Use hedged language ("seems", "appears", "mentioned").
-Only include observations that are likely to be relevant in future conversations.
-If there is nothing notable, output an empty response.`;
+export type ExtractedFact = {
+  content: string;
+  category: 'user' | 'world' | 'being';
+};
+
+const EXTRACTION_PROMPT = `You are analysing a conversation to extract factual hypotheses.
+
+Output a JSON array of objects. Each object has:
+- "content": a concise hedged hypothesis ("seems", "appears", "mentioned"). Only include observations likely to matter in future conversations.
+- "category": one of "user" (about this person), "world" (about external events or reality), or "being" (about you, the AI).
+
+If there is nothing notable, output an empty array [].
+Output ONLY the JSON array. No prose, no markdown fences.`;
 
 export async function extractFacts(
   userId: string,
   messages: Message[],
-): Promise<string[]> {
+): Promise<ExtractedFact[]> {
   const transcript = messages
     .map(m => `${m.role === 'user' ? 'User' : 'Being'}: ${m.content}`)
     .join('\n');
@@ -22,15 +30,23 @@ export async function extractFacts(
     { role: 'user', content: `Conversation:\n${transcript}` },
   ]);
 
-  const facts = response
-    .split('\n')
-    .map(line => line.replace(/^-\s*/, '').trim())
-    .filter(line => line.length > 0);
+  let facts: ExtractedFact[];
+  try {
+    const parsed = JSON.parse(response.trim());
+    if (!Array.isArray(parsed)) return [];
+    facts = parsed.filter(
+      (f): f is ExtractedFact =>
+        typeof f?.content === 'string' &&
+        ['user', 'world', 'being'].includes(f?.category),
+    );
+  } catch {
+    return [];
+  }
 
   await Promise.all(
     facts.map(async fact => {
-      const embedding = await embed(fact).catch(() => undefined);
-      await upsertEntityFact(userId, fact, 0.7, embedding);
+      const embedding = await embed(fact.content).catch(() => undefined);
+      await upsertEntityFact(userId, fact.content, 0.7, fact.category, embedding);
     }),
   );
 
