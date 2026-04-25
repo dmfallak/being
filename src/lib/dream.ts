@@ -1,24 +1,28 @@
 // src/lib/dream.ts
 import { z } from 'zod';
 import type { Message } from './llm.js';
-import type { EntityFactRow, DreamArtifactRow } from '../types/db.js';
+import type { DreamArtifactRow } from '../types/db.js';
+import type { DescriptorNode } from '../types/graph.js';
 import {
   withTransaction,
   getUnprocessedConversations,
   countUnprocessedConversations,
   getMessagesForConversation,
-  getAllEntityFacts,
-  updateFactSalience,
-  reinforceFact,
   insertDreamRun,
   finalizeDreamRun,
   markConversationsDreamed,
-  upsertEntityFact,
-  supersedeEntityFact,
-  getActiveFacts,
-  getActiveFactsByCategory,
   insertDreamArtifact,
 } from './db.js';
+import {
+  upsertEntity,
+  upsertDescriptor,
+  linkDescriptorToEntity,
+  upsertEntityRelation,
+  supersedeDescriptor,
+  reinforceDescriptor,
+  updateDescriptorSaliences,
+  getActiveDescriptors,
+} from './graph.js';
 import { generateResponse } from './llm.js';
 import { embed } from './embed.js';
 
@@ -42,6 +46,16 @@ export function computeDecayedSalience(oldSalience: number, daysSince: number): 
 const HypothesisSchema = z.object({
   content: z.string(),
   category: z.enum(['user', 'world', 'being']),
+  entityName: z.string().optional(),
+});
+
+const GraphUpdatesSchema = z.object({
+  entities: z.array(z.object({ name: z.string() })).default([]),
+  relations: z.array(z.object({
+    fromName: z.string(),
+    toName: z.string(),
+    type: z.string(),
+  })).default([]),
 });
 
 const ReflectionSchema = z.object({
@@ -49,13 +63,18 @@ const ReflectionSchema = z.object({
   reinforced_ids: z.array(z.string()),
   superseded_old_ids: z.array(z.string()),
   note: z.string(),
+  graph_updates: GraphUpdatesSchema.optional().default({ entities: [], relations: [] }),
 });
 
 export type ReflectionResult = {
-  newHypotheses: Array<{ content: string; category: 'user' | 'world' | 'being' }>;
+  newHypotheses: Array<{ content: string; category: 'user' | 'world' | 'being'; entityName?: string }>;
   reinforcedIds: string[];
   supersededOldIds: string[];
   note: string;
+  graphUpdates: {
+    entities: Array<{ name: string }>;
+    relations: Array<{ fromName: string; toName: string; type: string }>;
+  };
 };
 
 export type GenerateFn = (
@@ -66,13 +85,16 @@ export type GenerateFn = (
 
 const REFLECTION_SYSTEM_PROMPT = `You are reflecting on a past conversation with distance you did not have in the moment.
 
-You will be given a list of current hypotheses about this user, and a conversation transcript.
+You will be given a list of current descriptor hypotheses about this user, and a conversation transcript.
 
-Output JSON with exactly four fields:
-- "new_hypotheses": array of objects with "content" (hedged hypothesis string) and "category" ("user" for observations about this person, "world" for observations about external reality, "being" for observations about yourself). Only include observations likely to matter in future conversations. May be empty.
+Output JSON with exactly five fields:
+- "new_hypotheses": array of objects with "content" (hedged hypothesis string), "category" ("user" for observations about this person, "world" for observations about external reality, "being" for observations about yourself), and optional "entityName" (the specific entity this describes, e.g. "Devin", "Being Project"). Only include observations likely to matter in future conversations. May be empty.
 - "reinforced_ids": array of IDs from the existing list that this conversation provides independent evidence for.
-- "superseded_old_ids": array of IDs from the existing list that are contradicted or replaced by new information in this conversation. Only include IDs where you are confident the old fact is no longer accurate.
+- "superseded_old_ids": array of IDs from the existing list that are contradicted or replaced by new information. Only include IDs where you are confident the old descriptor is no longer accurate.
 - "note": one or two sentences, first-person, on what was notable about this conversation on reflection.
+- "graph_updates": object with two fields:
+    - "entities": array of {name} objects for named things mentioned (people, projects, concepts, places). Only include entities worth remembering.
+    - "relations": array of {fromName, toName, type} objects describing how entities relate. "type" is a short freeform phrase ("works on", "built by", "is skeptical of"). Only include relations that are factual and stable.
 
 Output ONLY the JSON object. No prose, no markdown fences.`;
 
@@ -89,21 +111,21 @@ function formatTranscript(messages: Message[]): string {
     .join('\n');
 }
 
-function formatFactList(facts: EntityFactRow[]): string {
-  if (facts.length === 0) return '(none yet)';
-  return facts
-    .map(f => `- ${f.id} | salience=${f.salience.toFixed(2)} | ${f.content}`)
+function formatDescriptorList(descriptors: DescriptorNode[]): string {
+  if (descriptors.length === 0) return '(none yet)';
+  return descriptors
+    .map(d => `- ${d.id} | salience=${d.salience.toFixed(2)} | ${d.content}`)
     .join('\n');
 }
 
 export async function reflectOnConversation(inputs: {
-  facts: EntityFactRow[];
+  facts: DescriptorNode[];
   messages: Message[];
   generate: GenerateFn;
 }): Promise<ReflectionResult | null> {
   const { facts, messages, generate } = inputs;
-  const userPrompt = `Current hypotheses about this user:
-${formatFactList(facts)}
+  const userPrompt = `Current descriptors:
+${formatDescriptorList(facts)}
 
 Conversation transcript:
 ${formatTranscript(messages)}`;
@@ -129,6 +151,7 @@ ${formatTranscript(messages)}`;
     reinforcedIds: validation.data.reinforced_ids,
     supersededOldIds: validation.data.superseded_old_ids,
     note: validation.data.note,
+    graphUpdates: validation.data.graph_updates,
   };
 }
 
@@ -235,15 +258,16 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
       const totalUnprocessed = await countUnprocessedConversations(userId, client);
       const capHit = totalUnprocessed > CONVERSATIONS_PER_DREAM_CAP;
 
-      const facts = await getAllEntityFacts(userId, client);
-      const activeFacts = await getActiveFacts(userId, client);
+      // Salience decay: compute per-descriptor and batch-update
+      const allDescriptors = await getActiveDescriptors(userId);
+      const salienceUpdates = allDescriptors.map(d => {
+        const lastReinforced = new Date(d.lastReinforcedAt);
+        const daysSince = (now.getTime() - lastReinforced.getTime()) / 86400000;
+        return { id: d.id, salience: computeDecayedSalience(d.salience, daysSince) };
+      });
+      await updateDescriptorSaliences(salienceUpdates, userId);
 
-      for (const fact of facts) {
-        const daysSince = (now.getTime() - fact.last_reinforced_at.getTime()) / (24 * 60 * 60 * 1000);
-        const newSalience = computeDecayedSalience(fact.salience, daysSince);
-        await updateFactSalience(fact.id, userId, newSalience, client);
-        fact.salience = newSalience;
-      }
+      const activeDescriptors = await getActiveDescriptors(userId);
 
       const notes: string[] = [];
       let factsCreated = 0;
@@ -253,7 +277,7 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
       for (const conv of conversations) {
         const messages = await getMessagesForConversation(conv.id, client);
         const reflection = await reflectOnConversation({
-          facts: activeFacts,
+          facts: activeDescriptors,
           messages: messages.map(m => ({ role: m.role, content: m.content })),
           generate: retryingGenerate,
         });
@@ -264,36 +288,56 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
 
         notes.push(reflection.note);
 
+        // Write graph entities and relations
+        for (const entity of reflection.graphUpdates.entities) {
+          await upsertEntity(userId, entity.name).catch(() => {});
+        }
+        for (const relation of reflection.graphUpdates.relations) {
+          await upsertEntityRelation(userId, relation.fromName, relation.toName, relation.type).catch(() => {});
+        }
+
+        // Write new descriptors and optionally link to entities
         for (const hypothesis of reflection.newHypotheses) {
           const embedding = await embed(hypothesis.content).catch(() => undefined);
-          await upsertEntityFact(userId, hypothesis.content, 0.7, hypothesis.category, embedding, client);
+          const descriptorId = await upsertDescriptor(
+            userId, hypothesis.content, hypothesis.category, 0.7, embedding,
+          );
+          if (hypothesis.entityName) {
+            const entityId = await upsertEntity(userId, hypothesis.entityName).catch(() => null);
+            if (entityId) {
+              await linkDescriptorToEntity(userId, entityId, descriptorId).catch(() => {});
+            }
+          }
           factsCreated++;
         }
 
         for (const oldId of reflection.supersededOldIds) {
-          await supersedeEntityFact(oldId, userId, client).catch(() => {});
+          await supersedeDescriptor(oldId, userId).catch(() => {});
         }
 
         for (const id of reflection.reinforcedIds) {
-          const ok = await reinforceFact(id, userId, client);
-          if (ok) factsReinforced++;
+          await reinforceDescriptor(id, userId).catch(() => {});
+          factsReinforced++;
         }
       }
 
-      // Fetch per-category active facts for portrait synthesis
-      const [userFacts, worldFacts, beingFacts] = await Promise.all([
-        getActiveFactsByCategory(userId, 'user', client),
-        getActiveFactsByCategory(userId, 'world', client),
-        getActiveFactsByCategory(userId, 'being', client),
+      // Portrait synthesis using graph
+      const [userDescs, worldDescs, beingDescs] = await Promise.all([
+        getActiveDescriptors(userId, 'user'),
+        getActiveDescriptors(userId, 'world'),
+        getActiveDescriptors(userId, 'being'),
       ]);
 
-      const portraitDefs: Array<{ type: 'relational_portrait' | 'self_model' | 'world_model'; inputFacts: string[] }> = [
-        { type: 'relational_portrait', inputFacts: userFacts.map(f => f.content) },
-        { type: 'world_model', inputFacts: worldFacts.map(f => f.content) },
+      const portraitDefs: Array<{
+        type: 'relational_portrait' | 'self_model' | 'world_model';
+        inputFacts: string[];
+      }> = [
+        { type: 'relational_portrait', inputFacts: userDescs.map(d => d.content) },
+        { type: 'world_model', inputFacts: worldDescs.map(d => d.content) },
         {
           type: 'self_model',
           inputFacts: [
-            ...beingFacts.map(f => f.content),
+            ...beingDescs.map(d => d.content),
             ...notes.map(n => `[reflection note] ${n}`),
           ],
         },

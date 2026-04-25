@@ -26,19 +26,20 @@ test('computeDecayedSalience: clamps to [0, 1]', () => {
 });
 
 import type { Message } from '../../src/lib/llm.js';
-import type { EntityFactRow } from '../../src/types/db.js';
+import type { DescriptorNode } from '../../src/types/graph.js';
 
-function factFixture(partial: Partial<EntityFactRow>): EntityFactRow {
+function descriptorFixture(partial: Partial<DescriptorNode>): DescriptorNode {
   return {
     id: 'fact-1',
-    user_id: 'u1',
+    userId: 'u1',
     content: 'seems to value directness',
     category: 'user',
     salience: 0.7,
-    superseded_at: null,
-    created_at: new Date(),
-    updated_at: new Date(),
-    last_reinforced_at: new Date(),
+    supersededAt: null,
+    embedding: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    lastReinforcedAt: new Date().toISOString(),
     ...partial,
   };
 }
@@ -61,7 +62,7 @@ test('reflectOnConversation: parses valid JSON with categories and supersessions
     { role: 'assistant', content: 'hello' },
   ];
   const result = await reflectOnConversation({
-    facts: [factFixture({ id: 'fact-1' }), factFixture({ id: 'fact-2' })],
+    facts: [descriptorFixture({ id: 'fact-1' }), descriptorFixture({ id: 'fact-2' })],
     messages,
     generate,
   });
@@ -73,6 +74,7 @@ test('reflectOnConversation: parses valid JSON with categories and supersessions
     reinforcedIds: ['fact-1'],
     supersededOldIds: ['fact-2'],
     note: 'Felt calmer in this one.',
+    graphUpdates: { entities: [], relations: [] },
   });
   const [, , options] = generate.mock.calls[0]!;
   expect(options).toEqual({ temperature: 0.4 });
@@ -114,6 +116,55 @@ test('reflectOnConversation: tolerates JSON wrapped in markdown code fences', as
   });
   expect(result?.newHypotheses[0]?.content).toBe('a');
   expect(result?.newHypotheses[0]?.category).toBe('user');
+});
+
+test('reflectOnConversation parses graph_updates from reflection output', async () => {
+  const { reflectOnConversation } = await import('../../src/lib/dream.js');
+  const generate = vi.fn().mockResolvedValue(
+    JSON.stringify({
+      new_hypotheses: [
+        { content: 'values directness', category: 'user', entityName: 'Devin' },
+      ],
+      reinforced_ids: [],
+      superseded_old_ids: [],
+      note: 'Noted.',
+      graph_updates: {
+        entities: [{ name: 'Devin' }, { name: 'Being Project' }],
+        relations: [{ fromName: 'Devin', toName: 'Being Project', type: 'works on' }],
+      },
+    }),
+  );
+  const result = await reflectOnConversation({
+    facts: [],
+    messages: [{ role: 'user', content: 'hi' }],
+    generate,
+  });
+  expect(result).not.toBeNull();
+  expect(result!.graphUpdates.entities).toHaveLength(2);
+  expect(result!.graphUpdates.relations[0]).toMatchObject({
+    fromName: 'Devin', toName: 'Being Project', type: 'works on',
+  });
+  expect(result!.newHypotheses[0]!.entityName).toBe('Devin');
+});
+
+test('reflectOnConversation handles missing graph_updates gracefully', async () => {
+  const { reflectOnConversation } = await import('../../src/lib/dream.js');
+  const generate = vi.fn().mockResolvedValue(
+    JSON.stringify({
+      new_hypotheses: [],
+      reinforced_ids: [],
+      superseded_old_ids: [],
+      note: 'Nothing.',
+    }),
+  );
+  const result = await reflectOnConversation({
+    facts: [],
+    messages: [{ role: 'user', content: 'hi' }],
+    generate,
+  });
+  expect(result).not.toBeNull();
+  expect(result!.graphUpdates.entities).toHaveLength(0);
+  expect(result!.graphUpdates.relations).toHaveLength(0);
 });
 
 test('generateResidue: produces prose with temp 1.2 and includes notes + fact summary', async () => {
@@ -172,22 +223,26 @@ test('generatePortrait: returns null when facts array is empty', async () => {
   expect(generate).not.toHaveBeenCalled();
 });
 
+vi.mock('../../src/lib/graph.js', () => ({
+  upsertEntity: vi.fn().mockResolvedValue('entity-uuid'),
+  upsertDescriptor: vi.fn().mockResolvedValue('desc-uuid'),
+  linkDescriptorToEntity: vi.fn().mockResolvedValue(undefined),
+  upsertEntityRelation: vi.fn().mockResolvedValue(undefined),
+  supersedeDescriptor: vi.fn().mockResolvedValue(undefined),
+  reinforceDescriptor: vi.fn().mockResolvedValue(undefined),
+  updateDescriptorSaliences: vi.fn().mockResolvedValue(undefined),
+  getActiveDescriptors: vi.fn().mockResolvedValue([]),
+}));
+
 vi.mock('../../src/lib/db.js', () => ({
   withTransaction: vi.fn(),
   getLatestDreamRun: vi.fn(),
   getUnprocessedConversations: vi.fn(),
   countUnprocessedConversations: vi.fn(),
   getMessagesForConversation: vi.fn(),
-  getAllEntityFacts: vi.fn(),
-  updateFactSalience: vi.fn(),
-  reinforceFact: vi.fn(),
   insertDreamRun: vi.fn(),
   finalizeDreamRun: vi.fn(),
   markConversationsDreamed: vi.fn(),
-  upsertEntityFact: vi.fn(),
-  getActiveFacts: vi.fn(),
-  getActiveFactsByCategory: vi.fn(),
-  supersedeEntityFact: vi.fn(),
   insertDreamArtifact: vi.fn(),
 }));
 
@@ -214,6 +269,7 @@ test('maybeDream: skips when no unprocessed conversations', async () => {
 test('maybeDream: full happy path — decays, reflects, reinforces, extracts, persists 4 artifacts', async () => {
   vi.clearAllMocks();
   const db = await import('../../src/lib/db.js');
+  const graph = await import('../../src/lib/graph.js');
   const llm = await import('../../src/lib/llm.js');
 
   const mockClient = { query: vi.fn() };
@@ -235,25 +291,18 @@ test('maybeDream: full happy path — decays, reflects, reinforces, extracts, pe
     { id: 'c-2', user_id: 'u1', created_at: new Date(), emotional_intensity: null, prediction_error: null, last_dream_at: null },
   ]);
 
-  const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
-  (db.getAllEntityFacts as any).mockResolvedValue([
-    { id: 'fact-existing', user_id: 'u1', content: 'seems analytical', category: 'user',
-      salience: 0.8, superseded_at: null, created_at: tenDaysAgo, updated_at: tenDaysAgo, last_reinforced_at: tenDaysAgo },
-  ]);
-
-  (db.getActiveFacts as any).mockResolvedValue([
-    { id: 'fact-existing', content: 'seems analytical', category: 'user', salience: 0.78 },
-  ]);
-
-  (db.getActiveFactsByCategory as any).mockResolvedValue([
-    { content: 'seems analytical', category: 'user', salience: 0.78 },
+  const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+  (graph.getActiveDescriptors as any).mockResolvedValue([
+    { id: 'fact-existing', userId: 'u1', content: 'seems analytical', category: 'user',
+      salience: 0.8, supersededAt: null, embedding: null,
+      createdAt: tenDaysAgo, updatedAt: tenDaysAgo, lastReinforcedAt: tenDaysAgo },
   ]);
 
   (db.getMessagesForConversation as any).mockResolvedValue([
     { id: 'm1', conversation_id: 'c-1', user_id: 'u1', role: 'user', content: 'hi', created_at: new Date() },
   ]);
 
-  (db.reinforceFact as any).mockResolvedValue(true);
+  (graph.reinforceDescriptor as any).mockResolvedValue(undefined);
 
   const artifactRow = { id: 'art-1', dream_run_id: 'dr-1', user_id: 'u1', type: 'residue', prose: 'p', embedding: null, created_at: new Date() };
   (db.insertDreamArtifact as any).mockResolvedValue(artifactRow);
@@ -285,6 +334,7 @@ test('maybeDream: full happy path — decays, reflects, reinforces, extracts, pe
 
 test('maybeDream: sets cap_hit when unprocessed count exceeds cap', async () => {
   const db = await import('../../src/lib/db.js');
+  const graph = await import('../../src/lib/graph.js');
   const llm = await import('../../src/lib/llm.js');
   vi.clearAllMocks();
 
@@ -301,16 +351,13 @@ test('maybeDream: sets cap_hit when unprocessed count exceeds cap', async () => 
       emotional_intensity: null, prediction_error: null, last_dream_at: null,
     })),
   );
-  (db.getAllEntityFacts as any).mockResolvedValue([]);
-  (db.getActiveFacts as any).mockResolvedValue([]);
-  (db.getActiveFactsByCategory as any).mockResolvedValue([]);
+  (graph.getActiveDescriptors as any).mockResolvedValue([]);
   (db.getMessagesForConversation as any).mockResolvedValue([]);
   (db.insertDreamArtifact as any).mockResolvedValue({
     id: 'art-2', dream_run_id: 'dr-2', user_id: 'u1',
     type: 'residue', prose: 'p', embedding: null, created_at: new Date(),
   });
 
-  // All 30 reflections return the same valid JSON; portrait + residue calls return prose.
   (llm.generateResponse as any).mockImplementation(async (_sys: string, _msgs: any, opts: any) => {
     if (opts?.temperature === 1.2 || opts?.temperature === 0.6) return 'p';
     return JSON.stringify({ new_hypotheses: [], reinforced_ids: [], superseded_old_ids: [], note: 'ok' });
@@ -330,6 +377,7 @@ test('maybeDream: sets cap_hit when unprocessed count exceeds cap', async () => 
 
 test('maybeDream: malformed reflection drops that conversation but dream still completes', async () => {
   const db = await import('../../src/lib/db.js');
+  const graph = await import('../../src/lib/graph.js');
   const llm = await import('../../src/lib/llm.js');
   vi.clearAllMocks();
 
@@ -344,9 +392,7 @@ test('maybeDream: malformed reflection drops that conversation but dream still c
     { id: 'c-good', user_id: 'u1', created_at: new Date(), emotional_intensity: null, prediction_error: null, last_dream_at: null },
     { id: 'c-bad',  user_id: 'u1', created_at: new Date(), emotional_intensity: null, prediction_error: null, last_dream_at: null },
   ]);
-  (db.getAllEntityFacts as any).mockResolvedValue([]);
-  (db.getActiveFacts as any).mockResolvedValue([]);
-  (db.getActiveFactsByCategory as any).mockResolvedValue([]);
+  (graph.getActiveDescriptors as any).mockResolvedValue([]);
   (db.getMessagesForConversation as any).mockResolvedValue([]);
   (db.insertDreamArtifact as any).mockResolvedValue({
     id: 'art-3', dream_run_id: 'dr-3', user_id: 'u1',
@@ -362,9 +408,7 @@ test('maybeDream: malformed reflection drops that conversation but dream still c
   const result = await maybeDream('u1');
 
   expect(result.dreamed).toBe(true);
-  // Both conversations still marked dreamed — malformed reflection does not block mark.
   expect(db.markConversationsDreamed).toHaveBeenCalledWith(['c-good', 'c-bad'], mockClient);
-  // The malformed reflection is counted in the audit metadata.
   expect(db.finalizeDreamRun).toHaveBeenCalledWith(
     'dr-3',
     expect.objectContaining({ parse_failures: 1, conversations_processed: 2 }),
@@ -374,6 +418,7 @@ test('maybeDream: malformed reflection drops that conversation but dream still c
 
 test('maybeDream: on pipeline error, records failure and returns non-dreamed outcome', async () => {
   const db = await import('../../src/lib/db.js');
+  const graph = await import('../../src/lib/graph.js');
   const llm = await import('../../src/lib/llm.js');
   vi.clearAllMocks();
 
@@ -385,7 +430,6 @@ test('maybeDream: on pipeline error, records failure and returns non-dreamed out
       id: 'dr-err', user_id: 'u1', started_at: new Date(), completed_at: null,
       conversations_processed: 0, facts_created: 0, facts_reinforced: 0, cap_hit: false, error: null,
     })
-    // Second invocation is for the audit row outside the rolled-back transaction.
     .mockResolvedValueOnce({
       id: 'dr-audit', user_id: 'u1', started_at: new Date(), completed_at: null,
       conversations_processed: 0, facts_created: 0, facts_reinforced: 0, cap_hit: false, error: null,
@@ -393,10 +437,8 @@ test('maybeDream: on pipeline error, records failure and returns non-dreamed out
   (db.getUnprocessedConversations as any).mockResolvedValue([
     { id: 'c-x', user_id: 'u1', created_at: new Date(), emotional_intensity: null, prediction_error: null, last_dream_at: null },
   ]);
-  (db.getAllEntityFacts as any).mockResolvedValue([]);
-  (db.getActiveFacts as any).mockResolvedValue([]);
+  (graph.getActiveDescriptors as any).mockResolvedValue([]);
   (db.getMessagesForConversation as any).mockResolvedValue([]);
-  // Reflection call fails twice (one retry per spec, then abort).
   (llm.generateResponse as any)
     .mockRejectedValueOnce(new Error('boom'))
     .mockRejectedValueOnce(new Error('boom-retry'));
@@ -405,8 +447,6 @@ test('maybeDream: on pipeline error, records failure and returns non-dreamed out
   const result = await maybeDream('u1');
 
   expect(result).toEqual({ dreamed: false, reason: 'error' });
-  // Audit row written outside the failed transaction: insertDreamRun called once
-  // inside the tx (for dr-err, rolled back) and once outside (for the audit row).
   expect(db.insertDreamRun).toHaveBeenCalledTimes(2);
   expect(db.finalizeDreamRun).toHaveBeenCalledWith(
     'dr-audit',
