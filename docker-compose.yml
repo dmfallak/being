@@ -15,14 +15,32 @@ services:
       timeout: 5s
       retries: 10
 
+  neo4j:
+    image: neo4j:5
+    environment:
+      NEO4J_AUTH: none
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4jdata:/var/lib/neo4j/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
   being:
     build: .
     depends_on:
       db:
         condition: service_healthy
+      neo4j:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgres://being:being@db:5432/being
       ALCHEMIST_ROOT: /alchemist
+      NEO4J_URI: bolt://neo4j:7687
     volumes:
       - ../alchemist:/alchemist
     stdin_open: true
@@ -30,3 +48,4 @@ services:
 
 volumes:
   pgdata:
+  neo4jdata:
