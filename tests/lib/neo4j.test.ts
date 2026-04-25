@@ -15,7 +15,6 @@ vi.mock('neo4j-driver', () => {
   return {
     default: {
       driver: vi.fn(() => ({ session: vi.fn(() => ({ run, close })), close: vi.fn().mockResolvedValue(undefined) })),
-      auth: { none: vi.fn(() => ({})) },
     },
   };
 });

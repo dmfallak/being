@@ -2,7 +2,7 @@
 import neo4j from 'neo4j-driver';
 import { config } from './config.js';
 
-const driver = neo4j.driver(config.NEO4J_URI, neo4j.auth.none());
+const driver = neo4j.driver(config.NEO4J_URI);
 
 export function getSession() {
   return driver.session();
