@@ -197,6 +197,35 @@ export async function getLatestArtifacts(
   return artifacts;
 }
 
+export async function getReDreamCandidatePool(
+  userId: string,
+  excludeConversationIds: string[],
+  client: pg.PoolClient | pg.Pool = db,
+): Promise<ConversationRow[]> {
+  const result = await client.query<ConversationRow>(
+    `SELECT * FROM conversations
+     WHERE user_id = $1
+       AND last_dream_at IS NOT NULL
+       AND (last_redream_at IS NULL OR last_redream_at < now() - interval '7 days')
+       AND id != ALL($2::uuid[])
+     ORDER BY last_dream_at ASC`,
+    [userId, excludeConversationIds.length > 0 ? excludeConversationIds : ['00000000-0000-0000-0000-000000000000']],
+  );
+  return result.rows;
+}
+
+export async function incrementReDreamCount(
+  conversationId: string,
+  client: pg.PoolClient | pg.Pool = db,
+): Promise<void> {
+  await client.query(
+    `UPDATE conversations
+     SET redream_count = redream_count + 1, last_redream_at = now()
+     WHERE id = $1`,
+    [conversationId],
+  );
+}
+
 export async function markConversationsDreamed(
   conversationIds: string[],
   client: pg.PoolClient | pg.Pool = db,
