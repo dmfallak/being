@@ -444,8 +444,12 @@ export type DreamOutcome =
 export async function maybeDream(userId: string, now: Date = new Date()): Promise<DreamOutcome> {
   const unprocessedCount = await countUnprocessedConversations(userId);
 
-  if (!shouldDream({ hasUnprocessed: unprocessedCount > 0 })) {
-    return { dreamed: false, reason: 'no-unprocessed' };
+  if (unprocessedCount === 0) {
+    // No new conversations — still dream if there are re-dream candidates
+    const reDreamPool = await getReDreamCandidatePool(userId, []).catch(() => []);
+    if (reDreamPool.length === 0) {
+      return { dreamed: false, reason: 'no-unprocessed' };
+    }
   }
 
   return runDream(userId, now);

@@ -467,10 +467,11 @@ vi.mock('../../src/lib/llm.js', () => ({
   generateResponse: vi.fn(),
 }));
 
-test('maybeDream: skips when no unprocessed conversations', async () => {
+test('maybeDream: skips when no unprocessed conversations and no re-dream candidates', async () => {
   vi.clearAllMocks();
   const db = await import('../../src/lib/db.js');
   (db.countUnprocessedConversations as any).mockResolvedValue(0);
+  (db.getReDreamCandidatePool as any).mockResolvedValue([]);
 
   const { maybeDream } = await import('../../src/lib/dream.js');
   const result = await maybeDream('u1');
