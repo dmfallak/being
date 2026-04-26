@@ -88,7 +88,7 @@ const REFLECTION_SYSTEM_PROMPT = `You are reflecting on a past conversation with
 You will be given a list of current descriptor hypotheses about this user, and a conversation transcript.
 
 Output JSON with exactly five fields:
-- "new_hypotheses": array of objects with "content" (hedged hypothesis string), "category" ("user" for observations about this person, "world" for observations about external reality, "being" for observations about yourself), and optional "entityName" (the specific entity this describes, e.g. "Devin", "Being Project"). Only include observations likely to matter in future conversations. May be empty.
+- "new_hypotheses": array of objects with "content" (hedged hypothesis string), "category" ("user" for observations about this person, "world" for observations about external reality, "being" for observations about yourself), and "entityName" (the specific named entity this descriptor belongs to — a person, project, concept, or place, e.g. "Devin", "Being Project", "LoRA pipeline"). Always include entityName when the descriptor is about a specific named thing. Omit only for truly general observations that cannot be attributed to any named entity. Only include observations likely to matter in future conversations. May be empty.
 - "reinforced_ids": array of IDs from the existing list that this conversation provides independent evidence for.
 - "superseded_old_ids": array of IDs from the existing list that are contradicted or replaced by new information. Only include IDs where you are confident the old descriptor is no longer accurate.
 - "note": one or two sentences, first-person, on what was notable about this conversation on reflection.
