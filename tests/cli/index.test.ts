@@ -10,6 +10,9 @@ vi.mock('../../src/lib/graph.js', () => ({
   searchDescriptors: vi.fn().mockResolvedValue([]),
   describeEntity: vi.fn().mockResolvedValue(null),
 }));
+vi.mock('../../src/lib/neo4j.js', () => ({
+  closeDriver: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock('../../src/lib/dream.js', () => ({
   maybeDream: vi.fn().mockResolvedValue({ dreamed: false, reason: 'no-unprocessed' }),
 }));
@@ -17,6 +20,7 @@ vi.mock('../../src/lib/db.js', () => ({
   createConversation: vi.fn().mockResolvedValue({ id: 'conv-1', user_id: 'default', created_at: new Date() }),
   saveMessage: vi.fn().mockResolvedValue({}),
   getLatestArtifacts: vi.fn().mockResolvedValue({}),
+  db: { end: vi.fn().mockResolvedValue(undefined) },
 }));
 
 test('startSession persists user and assistant messages', async () => {

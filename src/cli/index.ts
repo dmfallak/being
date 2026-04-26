@@ -5,7 +5,8 @@ import { buildSystemPrompt } from '../lib/seed.js';
 import { generateResponse } from '../lib/llm.js';
 import { updateState } from '../lib/ssm.js';
 import { embed } from '../lib/embed.js';
-import { createConversation, saveMessage, getLatestArtifacts } from '../lib/db.js';
+import { createConversation, saveMessage, getLatestArtifacts, db } from '../lib/db.js';
+import { closeDriver } from '../lib/neo4j.js';
 import { maybeDream } from '../lib/dream.js';
 import type { Message } from '../lib/llm.js';
 
@@ -76,6 +77,7 @@ export async function startSession(
     if (!rl) {
       interfaceInstance.close();
     }
+    await Promise.all([closeDriver(), db.end()]).catch(() => {});
   }
 }
 
