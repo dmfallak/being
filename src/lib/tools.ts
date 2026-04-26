@@ -18,12 +18,12 @@ Pass argv as an array of strings. Always run ["<subcommand>", "--help"] first wh
 - ["--json", "list", "tasks"]
 - ["plan", "Measure embedding cache hit rate", "--hypothesis=..."] — title is a single string arg
 - ["measure", "EXP-001", "hit_rate=0.82", "ratio"] — expId, then key=value, then optional unit
-- ["note", "EXP-001", "observation text"] — free-form observation
+- ["note", "EXP-001", "observation text"] — free-form observation on an experiment (EXP- only, not TSK-)
 - ["conclude", "EXP-001", "outcome text"]
 - ["task", "Ask user for fridge temp", "--linked-exp=EXP-001"] — task tied to an experiment
 - ["complete", "TSK-001", "--result=38 degF"] — close task with a finding; if the task has linked-exp, the result is also appended as an observation there
 - ["edit-exp", "EXP-001", "--title=New title", "--hypothesis=New hypothesis"] — update experiment fields in place
-- ["edit-task", "TSK-001", "--title=New title", "--priority=high"] — update task fields in place
+- ["edit-task", "TSK-001", "--title=New title", "--notes=text"] — update task fields; use --notes to add context to a task
 - ["search", "query text"]`,
   inputSchema: z.object({
     args: z.array(z.string()).describe('Argv passed to the alchemy binary'),
