@@ -1,5 +1,9 @@
 import { expect, test, vi } from 'vitest';
 
+vi.mock('../../src/lib/memoryTool.js', () => ({
+  memoryTool: { description: 'mock memory tool', inputSchema: {}, execute: vi.fn() },
+}));
+
 vi.mock('ai', async () => {
   const actual = await vi.importActual<typeof import('ai')>('ai');
   return {

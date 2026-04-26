@@ -1,6 +1,7 @@
 import { google } from '@ai-sdk/google';
 import { generateText, stepCountIs } from 'ai';
 import { alchemyTool } from './tools.js';
+import { memoryTool } from './memoryTool.js';
 
 export type Message = { role: 'user' | 'assistant'; content: string };
 
@@ -19,7 +20,7 @@ export async function generateResponse(
     model: google('gemini-3-flash-preview'),
     system: systemPrompt,
     messages,
-    tools: { alchemy: alchemyTool },
+    tools: { alchemy: alchemyTool, memory: memoryTool },
     maxSteps: MAX_TOOL_STEPS,
     stopWhen: stepCountIs(MAX_TOOL_STEPS),
   };
