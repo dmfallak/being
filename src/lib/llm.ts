@@ -2,6 +2,7 @@ import { google } from '@ai-sdk/google';
 import { generateText, stepCountIs } from 'ai';
 import { alchemyTool } from './tools.js';
 import { memoryTool } from './memoryTool.js';
+import { webSearchTool } from './webSearchTool.js';
 
 export type Message = { role: 'user' | 'assistant'; content: string };
 
@@ -29,6 +30,9 @@ function formatToolResult(name: string, result: Record<string, unknown>): string
     const out = (result.stdout as string | undefined)?.trim().slice(0, 80);
     return exit === 0 ? (out || 'ok') : `exit ${exit}`;
   }
+  if (name === 'web') {
+    if (Array.isArray(result.results)) return `${(result.results as unknown[]).length} results`;
+  }
   if (name === 'memory') {
     if (Array.isArray(result.results)) return `${(result.results as unknown[]).length} results`;
     if (result.found === false) return 'not found';
@@ -50,7 +54,7 @@ export async function generateResponse(
     model: google('gemini-3-flash-preview'),
     system: systemPrompt,
     messages,
-    tools: { alchemy: alchemyTool, memory: memoryTool },
+    tools: { alchemy: alchemyTool, memory: memoryTool, web: webSearchTool },
     maxSteps: MAX_TOOL_STEPS,
     stopWhen: stepCountIs(MAX_TOOL_STEPS),
     onStepFinish: ({ toolCalls, toolResults }) => {
