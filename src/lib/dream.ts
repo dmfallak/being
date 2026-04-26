@@ -146,14 +146,14 @@ Output JSON with exactly five fields:
 - "note": one or two sentences, first-person, on what was notable about this conversation on reflection.
 - "graph_updates": object with two fields:
     - "entities": array of {name} objects for named things mentioned (people, projects, concepts, places). Only include entities worth remembering.
-    - "relations": array of {fromName, toName, type} objects describing how entities relate. "type" must be one of the following lowercase underscore values — pick the closest fit:
+    - "relations": array of {fromName, toName, type} objects describing how entities relate. "type" should be a lowercase underscore string. Prefer these established types where they fit:
       Social/interpersonal: knows, works_with, friends_with, mentors, manages, reports_to, married_to, partner_of, studied_at, lives_in, employed_at
       Work/project: works_on, leads, created, founded, maintains, contributes_to
       Technical/tool: uses, built_with, depends_on, integrates_with, runs_on, serves_as, provides
       Organizational: part_of, member_of, affiliated_with, funded_by, acquired_by, contains, hosted_by
       Conceptual/epistemic: related_to, influences, based_on, derived_from, studies, investigates, advocates_for, skeptical_of, supports, contradicts, addresses, inspired_by, competes_with
       Governance/authority: governs, oversees, regulated_by, subject_to, bound_by, stewards
-      Always use active direction: fromName is the actor, toName is the object. Never use passive forms — flip the entities instead. E.g. instead of (Being, "is_governed_by", Ethics) write (Ethics, "governs", Being). Only include relations that are factual and stable.
+      If none fit, coin a new type in the same lowercase underscore style. Always use active direction: fromName is the actor, toName is the object. Never use passive forms — flip the entities instead. E.g. instead of (Being, "is_governed_by", Ethics) write (Ethics, "governs", Being). Only include relations that are factual and stable.
 
 Output ONLY the JSON object. No prose, no markdown fences.`;
 
