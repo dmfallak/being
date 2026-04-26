@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import type { Message } from './llm.js';
 import type { DreamArtifactRow } from '../types/db.js';
+import type { ConversationRow } from '../types/db.js';
 import type { DescriptorNode } from '../types/graph.js';
 import {
   withTransaction,
@@ -12,6 +13,8 @@ import {
   finalizeDreamRun,
   markConversationsDreamed,
   insertDreamArtifact,
+  getReDreamCandidatePool,
+  incrementReDreamCount,
 } from './db.js';
 import {
   upsertEntity,
@@ -22,6 +25,8 @@ import {
   reinforceDescriptor,
   updateDescriptorSaliences,
   getActiveDescriptors,
+  searchDescriptors,
+  getAllEntityNames,
 } from './graph.js';
 import { google } from '@ai-sdk/google';
 import { generateText, stepCountIs } from 'ai';
@@ -247,6 +252,56 @@ export async function selfReflect(inputs: {
   return validation.success ? validation.data : [];
 }
 
+export async function selectReDreamCandidates(
+  userId: string,
+  limit: number,
+  recentConversationIds: string[],
+  recentMessageTexts: string[],
+): Promise<ConversationRow[]> {
+  const [pool, entityNames] = await Promise.all([
+    getReDreamCandidatePool(userId, recentConversationIds),
+    getAllEntityNames(userId),
+  ]);
+
+  if (pool.length === 0) return [];
+
+  const recentText = recentMessageTexts.join(' ').toLowerCase();
+  const recentEntityNames = entityNames.filter(name =>
+    recentText.includes(name.toLowerCase()),
+  );
+
+  // Fallback: no recent entity context → staleness-only, oldest first
+  if (recentEntityNames.length === 0) {
+    return pool.slice(0, limit);
+  }
+
+  const now = Date.now();
+  const scored: Array<{ conv: ConversationRow; score: number }> = [];
+
+  for (const conv of pool) {
+    const messages = await getMessagesForConversation(conv.id);
+    const convText = messages.map(m => m.content).join(' ').toLowerCase();
+
+    const matchCount = recentEntityNames.filter(name =>
+      convText.includes(name.toLowerCase()),
+    ).length;
+
+    if (matchCount === 0) continue; // exclude zero-relevance when context exists
+
+    const daysSinceLastDream = (now - new Date(conv.last_dream_at!).getTime()) / 86400000;
+    const staleness = Math.min(1, daysSinceLastDream / 30);
+    const relevance = matchCount / recentEntityNames.length;
+    const score = staleness * relevance;
+
+    scored.push({ conv, score });
+  }
+
+  return scored
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(s => s.conv);
+}
+
 const PORTRAIT_PROMPTS: Record<'relational_portrait' | 'self_model' | 'world_model', string> = {
   relational_portrait: `You are the Being. Based on the facts below, write 2-4 paragraphs describing who this person is and how you work together.
 
@@ -309,6 +364,8 @@ export async function generateResidue(inputs: {
 }
 
 export const CONVERSATIONS_PER_DREAM_CAP = 30;
+export const REDREAM_CANDIDATES_PER_DREAM = 3;
+export const MERGE_SIMILARITY_THRESHOLD = 0.85;
 
 export type DreamOutcome =
   | { dreamed: false; reason: 'no-unprocessed' | 'error' }

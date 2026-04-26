@@ -223,6 +223,79 @@ test('generatePortrait: returns null when facts array is empty', async () => {
   expect(generate).not.toHaveBeenCalled();
 });
 
+import type { ConversationRow } from '../../src/types/db.js';
+
+function convFixture(partial: Partial<ConversationRow> & { id: string }): ConversationRow {
+  return {
+    id: partial.id,
+    user_id: 'u1',
+    created_at: new Date('2026-01-01'),
+    emotional_intensity: null,
+    prediction_error: null,
+    last_dream_at: new Date('2026-01-01'),
+    redream_count: 0,
+    last_redream_at: null,
+    ...partial,
+  };
+}
+
+test('selectReDreamCandidates scores by staleness × relevance and returns top limit', async () => {
+  vi.clearAllMocks();
+  const db = await import('../../src/lib/db.js');
+  const graph = await import('../../src/lib/graph.js');
+
+  const relevant = convFixture({ id: 'c-relevant' });
+  const irrelevant = convFixture({ id: 'c-irrelevant' });
+
+  (db.getReDreamCandidatePool as any).mockResolvedValue([relevant, irrelevant]);
+  (db.getMessagesForConversation as any)
+    .mockResolvedValueOnce([{ id: 'm1', conversation_id: 'c-relevant', user_id: 'u1', role: 'user', content: 'Devin mentioned something', created_at: new Date() }])
+    .mockResolvedValueOnce([{ id: 'm2', conversation_id: 'c-irrelevant', user_id: 'u1', role: 'user', content: 'something unrelated', created_at: new Date() }]);
+  (graph.getAllEntityNames as any).mockResolvedValue(['Devin', 'Being Project']);
+
+  const { selectReDreamCandidates } = await import('../../src/lib/dream.js');
+
+  const recentMessages = ['Devin is working on the Being Project'];
+  const result = await selectReDreamCandidates('u1', 3, ['c-recent'], recentMessages);
+
+  expect(result.map(c => c.id)).toContain('c-relevant');
+  expect(result.map(c => c.id)).not.toContain('c-irrelevant');
+});
+
+test('selectReDreamCandidates falls back to staleness-only when no recent entity matches', async () => {
+  vi.clearAllMocks();
+  const db = await import('../../src/lib/db.js');
+  const graph = await import('../../src/lib/graph.js');
+
+  const old = convFixture({ id: 'c-old', last_dream_at: new Date(Date.now() - 60 * 86400000) });
+  const newer = convFixture({ id: 'c-newer', last_dream_at: new Date(Date.now() - 10 * 86400000) });
+
+  (db.getReDreamCandidatePool as any).mockResolvedValue([old, newer]);
+  (graph.getAllEntityNames as any).mockResolvedValue(['Devin']);
+
+  const { selectReDreamCandidates } = await import('../../src/lib/dream.js');
+
+  const result = await selectReDreamCandidates('u1', 2, [], []);
+
+  expect(result[0]!.id).toBe('c-old');
+});
+
+test('selectReDreamCandidates respects limit', async () => {
+  vi.clearAllMocks();
+  const db = await import('../../src/lib/db.js');
+  const graph = await import('../../src/lib/graph.js');
+
+  const candidates = ['c-1', 'c-2', 'c-3', 'c-4'].map(id => convFixture({ id }));
+  (db.getReDreamCandidatePool as any).mockResolvedValue(candidates);
+  (db.getMessagesForConversation as any).mockResolvedValue([]);
+  (graph.getAllEntityNames as any).mockResolvedValue([]);
+
+  const { selectReDreamCandidates } = await import('../../src/lib/dream.js');
+  const result = await selectReDreamCandidates('u1', 2, [], []);
+
+  expect(result.length).toBeLessThanOrEqual(2);
+});
+
 vi.mock('../../src/lib/webSearchTool.js', () => ({
   webSearchTool: { description: 'mock', inputSchema: {}, execute: vi.fn() },
 }));
@@ -248,6 +321,8 @@ vi.mock('../../src/lib/graph.js', () => ({
   reinforceDescriptor: vi.fn().mockResolvedValue(undefined),
   updateDescriptorSaliences: vi.fn().mockResolvedValue(undefined),
   getActiveDescriptors: vi.fn().mockResolvedValue([]),
+  searchDescriptors: vi.fn().mockResolvedValue([]),
+  getAllEntityNames: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('../../src/lib/db.js', () => ({
@@ -260,6 +335,8 @@ vi.mock('../../src/lib/db.js', () => ({
   finalizeDreamRun: vi.fn(),
   markConversationsDreamed: vi.fn(),
   insertDreamArtifact: vi.fn(),
+  getReDreamCandidatePool: vi.fn().mockResolvedValue([]),
+  incrementReDreamCount: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../../src/lib/embed.js', () => ({
