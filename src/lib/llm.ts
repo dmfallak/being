@@ -10,7 +10,7 @@ export type GenerateOptions = {
   temperature?: number;
 };
 
-const MAX_TOOL_STEPS = 8;
+const MAX_TOOL_STEPS = 20;
 
 function formatToolCall(name: string, args: Record<string, unknown>): string {
   if (name === 'memory') {
@@ -71,11 +71,17 @@ export async function generateResponse(
   if (options?.temperature !== undefined) {
     args.temperature = options.temperature;
   }
-  const { text, steps } = await generateText(args);
+  const { text, steps, response } = await generateText(args);
   if (text) return text;
-  // Model exhausted steps via tool calls without producing a text turn — find the last step that has text.
+  // Find text from any step.
   for (let i = steps.length - 1; i >= 0; i--) {
     if (steps[i]!.text) return steps[i]!.text;
   }
-  return '(I lost the thread — please try again.)';
+  // All steps were tool calls — do one final synthesis pass with no tools.
+  const { text: synthesized } = await generateText({
+    model: google('gemini-3-flash-preview'),
+    system: systemPrompt,
+    messages: [...messages, ...response.messages],
+  });
+  return synthesized || '(I lost the thread — please try again.)';
 }
