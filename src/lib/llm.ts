@@ -11,6 +11,31 @@ export type GenerateOptions = {
 
 const MAX_TOOL_STEPS = 8;
 
+function formatToolCall(name: string, args: Record<string, unknown>): string {
+  if (name === 'memory') {
+    const cmdArgs = args.args as string[] | undefined;
+    return `memory: ${cmdArgs?.join(' ') ?? ''}`;
+  }
+  const argStr = Object.entries(args)
+    .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+    .join(' ');
+  return `${name}${argStr ? `: ${argStr.slice(0, 80)}` : ''}`;
+}
+
+function formatToolResult(name: string, result: Record<string, unknown>): string {
+  if (result.error) return `error: ${result.error}`;
+  if (name === 'memory') {
+    if (Array.isArray(result.results)) return `${(result.results as unknown[]).length} results`;
+    if (result.found === false) return 'not found';
+    if (result.found === true) {
+      const descs = result.descriptors as unknown[] | undefined;
+      const rels = result.relations as unknown[] | undefined;
+      return `found (${descs?.length ?? 0} descriptors, ${rels?.length ?? 0} relations)`;
+    }
+  }
+  return 'ok';
+}
+
 export async function generateResponse(
   systemPrompt: string,
   messages: Message[],
@@ -23,6 +48,16 @@ export async function generateResponse(
     tools: { alchemy: alchemyTool, memory: memoryTool },
     maxSteps: MAX_TOOL_STEPS,
     stopWhen: stepCountIs(MAX_TOOL_STEPS),
+    onStepFinish: ({ toolCalls, toolResults }) => {
+      for (const call of toolCalls) {
+        const label = formatToolCall(call.toolName, call.args as Record<string, unknown>);
+        const result = toolResults.find(r => r.toolCallId === call.toolCallId);
+        const resultStr = result
+          ? ` → ${formatToolResult(call.toolName, result.result as Record<string, unknown>)}`
+          : '';
+        process.stdout.write(`  [${label}${resultStr}]\n`);
+      }
+    },
   };
   if (options?.temperature !== undefined) {
     args.temperature = options.temperature;
