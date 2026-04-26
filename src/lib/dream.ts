@@ -624,7 +624,7 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
         );
         reDreamMerged += merged;
         reDreamCreated += created;
-        factsCreated += created + merged;
+        factsCreated += created;
 
         for (const oldId of reDreamReflection.supersededOldIds) {
           await supersedeDescriptor(oldId, userId).catch(() => {});
