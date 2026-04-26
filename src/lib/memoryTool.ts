@@ -22,7 +22,10 @@ Pass args as an array of strings:
     if (command === 'search') {
       const query = rest.join(' ');
       if (!query) return { error: 'search requires a query string' };
-      const embedding = await embed(query);
+      const embedding = await Promise.race([
+        embed(query),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('embed timeout')), 10000)),
+      ]);
       const results = await searchDescriptors(userId, embedding, 10);
       return {
         results: results.map(r => ({

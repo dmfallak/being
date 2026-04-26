@@ -27,6 +27,11 @@ export async function generateResponse(
   if (options?.temperature !== undefined) {
     args.temperature = options.temperature;
   }
-  const { text } = await generateText(args);
-  return text;
+  const { text, steps } = await generateText(args);
+  if (text) return text;
+  // Model exhausted steps via tool calls without producing a text turn — find the last step that has text.
+  for (let i = steps.length - 1; i >= 0; i--) {
+    if (steps[i]!.text) return steps[i]!.text;
+  }
+  return '(I lost the thread — please try again.)';
 }

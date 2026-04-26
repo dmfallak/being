@@ -16,6 +16,14 @@ export async function startSession(
   rl?: readline.Interface,
 ): Promise<void> {
   const interfaceInstance = rl ?? readline.createInterface({ input, output });
+
+  if (!rl) {
+    process.once('SIGINT', () => {
+      process.stdout.write('\n(Session ended)\n');
+      interfaceInstance.close();
+      process.exit(0);
+    });
+  }
   let currentState = initialState;
   const history: Message[] = [];
   let conversationId: string | null = null;
