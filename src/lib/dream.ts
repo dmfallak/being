@@ -174,8 +174,12 @@ export async function reflectOnConversation(inputs: {
   facts: DescriptorNode[];
   messages: Message[];
   generate: GenerateFn;
+  systemPromptSuffix?: string;
 }): Promise<ReflectionResult | null> {
-  const { facts, messages, generate } = inputs;
+  const { facts, messages, generate, systemPromptSuffix } = inputs;
+  const systemPrompt = systemPromptSuffix
+    ? `${REFLECTION_SYSTEM_PROMPT}\n\n${systemPromptSuffix}`
+    : REFLECTION_SYSTEM_PROMPT;
   const userPrompt = `Current descriptors:
 ${formatDescriptorList(facts)}
 
@@ -183,7 +187,7 @@ Conversation transcript:
 ${formatTranscript(messages)}`;
 
   const raw = await generate(
-    REFLECTION_SYSTEM_PROMPT,
+    systemPrompt,
     [{ role: 'user', content: userPrompt }],
     { temperature: 0.4 },
   );
@@ -562,16 +566,18 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
         generate: dreamGenerate,
       }).catch(() => [] as string[]);
 
-      for (const observation of selfObservations) {
-        const embedding = await embed(observation).catch(() => undefined);
-        const descriptorId = await upsertDescriptor(userId, observation, 'being', 0.7, embedding);
-        const beingEntityId = await upsertEntity(userId, 'Being').catch(() => null);
-        if (beingEntityId) {
-          await linkDescriptorToEntity(userId, beingEntityId, descriptorId).catch(() => {});
-        }
-        factsCreated++;
-      }
-      process.stdout.write(`dream: ${selfObservations.length} self-observations written\n`);
+      // Route self-observations through mergeDescriptors so similar existing Being
+      // descriptors are updated rather than duplicated.
+      const selfHypotheses = selfObservations.map(content => ({
+        content,
+        category: 'being' as const,
+        entityName: 'Being',
+      }));
+      const { merged: selfMerged, created: selfCreated } = await mergeDescriptors(
+        userId, selfHypotheses, retryingGenerate,
+      ).catch(() => ({ merged: 0, created: 0 }));
+      factsCreated += selfCreated;
+      process.stdout.write(`dream: ${selfObservations.length} self-observations — ${selfMerged} merged, ${selfCreated} new\n`);
 
       // Re-dream block: revisit old conversations with current context + web search
       const recentMessageTexts: string[] = [];
@@ -603,6 +609,7 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
           facts: activeDescriptors,
           messages: reDreamMessages.map(m => ({ role: m.role, content: m.content })),
           generate: dreamGenerate,
+          systemPromptSuffix: `You have access to a web search tool. Use it if this conversation touches topics where current information (post-2024) would meaningfully update your understanding — new research, events, developments. Only search when it would genuinely improve the hypotheses you form.`,
         });
 
         if (reDreamReflection === null) {
