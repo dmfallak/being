@@ -26,7 +26,7 @@ import {
 import { generateResponse } from './llm.js';
 import { embed } from './embed.js';
 
-export const DECAY_FACTOR = 0.98;
+export const DECAY_FACTOR = 0.999;
 
 export type ShouldDreamInputs = {
   hasUnprocessed: boolean;

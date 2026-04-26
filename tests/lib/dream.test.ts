@@ -14,9 +14,9 @@ test('computeDecayedSalience: identity at zero days', () => {
   expect(computeDecayedSalience(0.8, 0)).toBeCloseTo(0.8);
 });
 
-test('computeDecayedSalience: ~50% at ~34 days with DECAY_FACTOR 0.98', () => {
-  // 0.98^34 ≈ 0.5047
-  expect(computeDecayedSalience(1.0, 34)).toBeCloseTo(0.98 ** 34, 6);
+test('computeDecayedSalience: ~50% at ~693 days with DECAY_FACTOR 0.999', () => {
+  // 0.999^693 ≈ 0.5013 — half-life ~2 years
+  expect(computeDecayedSalience(1.0, 693)).toBeCloseTo(0.999 ** 693, 6);
 });
 
 test('computeDecayedSalience: clamps to [0, 1]', () => {
