@@ -146,3 +146,20 @@ test('describeEntity returns null when entity not found', async () => {
   const result = await describeEntity('u1', 'Unknown');
   expect(result).toBeNull();
 });
+
+test('getAllEntityNames returns all entity names for a user', async () => {
+  run.mockResolvedValue({
+    records: [
+      { get: () => 'Devin' },
+      { get: () => 'Being Project' },
+      { get: () => 'LoRA pipeline' },
+    ],
+  });
+  const { getAllEntityNames } = await import('../../src/lib/graph.js');
+  const names = await getAllEntityNames('u1');
+  expect(names).toEqual(['Devin', 'Being Project', 'LoRA pipeline']);
+  expect(run).toHaveBeenCalledWith(
+    expect.stringContaining('Entity'),
+    expect.objectContaining({ userId: 'u1' }),
+  );
+});

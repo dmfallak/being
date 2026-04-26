@@ -189,6 +189,19 @@ export async function searchDescriptors(
   }
 }
 
+export async function getAllEntityNames(userId: string): Promise<string[]> {
+  const session = getSession();
+  try {
+    const result = await session.run(
+      `MATCH (e:Entity {userId: $userId}) RETURN e.name AS name`,
+      { userId },
+    );
+    return result.records.map(r => r.get('name') as string);
+  } finally {
+    await session.close();
+  }
+}
+
 export async function describeEntity(
   userId: string,
   name: string,
