@@ -1,12 +1,15 @@
-.PHONY: db run lab
+.PHONY: db neo4j run lab
 
 ALCHEMIST_ROOT := $(CURDIR)/../alchemist
 
 db:
 	docker compose up -d --wait db
 
+neo4j:
+	docker compose up -d --wait neo4j
+
 lab:
 	$(MAKE) -C $(ALCHEMIST_ROOT) build
 
-run: db lab
+run: db neo4j lab
 	ALCHEMIST_ROOT=$(ALCHEMIST_ROOT) npm run migrate && ALCHEMIST_ROOT=$(ALCHEMIST_ROOT) npx tsx src/cli/index.ts
