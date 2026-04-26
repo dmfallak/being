@@ -6,7 +6,10 @@ import * as ssmModule from '../../src/lib/ssm.js';
 import * as dbModule from '../../src/lib/db.js';
 
 vi.mock('../../src/lib/embed.js', () => ({ embed: vi.fn().mockResolvedValue([0.1, 0.2]) }));
-vi.mock('../../src/lib/entity.js', () => ({ extractFacts: vi.fn().mockResolvedValue([]) }));
+vi.mock('../../src/lib/graph.js', () => ({
+  searchDescriptors: vi.fn().mockResolvedValue([]),
+  describeEntity: vi.fn().mockResolvedValue(null),
+}));
 vi.mock('../../src/lib/dream.js', () => ({
   maybeDream: vi.fn().mockResolvedValue({ dreamed: false, reason: 'no-unprocessed' }),
 }));
