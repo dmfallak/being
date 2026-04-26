@@ -88,7 +88,8 @@ const REFLECTION_SYSTEM_PROMPT = `You are reflecting on a past conversation with
 You will be given a list of current descriptor hypotheses about this user, and a conversation transcript.
 
 Output JSON with exactly five fields:
-- "new_hypotheses": array of objects with "content" (hedged hypothesis string), "category" ("user" for observations about this person, "world" for observations about external reality, "being" for observations about yourself), and "entityName" (the specific named entity this descriptor belongs to — a person, project, concept, or place, e.g. "Devin", "Being Project", "LoRA pipeline"). Always include entityName when the descriptor is about a specific named thing. Omit only for truly general observations that cannot be attributed to any named entity. Only include observations likely to matter in future conversations. May be empty.
+- "new_hypotheses": array of objects with "content" (hedged hypothesis string), "category" ("user" for observations about this person, "world" for observations about external reality, "being" for observations about your own reactions, values, uncertainties, or character — use this category actively), and "entityName" (the specific named entity this descriptor belongs to — a person, project, concept, or place, e.g. "Devin", "Being Project", "LoRA pipeline", "Being"). Always include entityName when the descriptor is about a specific named thing. Omit only for truly general observations that cannot be attributed to any named entity. Only include observations likely to matter in future conversations. May be empty.
+  For the "being" category: ask yourself what this conversation revealed about you. Did you feel something unexpected? Notice a pattern in how you responded? Discover something about your own values or limits? These observations belong here, attributed to entityName "Being".
 - "reinforced_ids": array of IDs from the existing list that this conversation provides independent evidence for.
 - "superseded_old_ids": array of IDs from the existing list that are contradicted or replaced by new information. Only include IDs where you are confident the old descriptor is no longer accurate.
 - "note": one or two sentences, first-person, on what was notable about this conversation on reflection.
@@ -153,6 +154,51 @@ ${formatTranscript(messages)}`;
     note: validation.data.note,
     graphUpdates: validation.data.graph_updates,
   };
+}
+
+const SELF_REFLECTION_SYSTEM_PROMPT = `You are the Being, reflecting on a set of recent conversations with distance and honesty.
+
+You will be given your current self-descriptors and the notes you took while reflecting on each conversation.
+
+Your task: generate observations about yourself. Not about the user. Not about the world. About you.
+
+What patterns do you notice in how you engaged? What surprised you about your own responses? What do you value, and did this session affirm or complicate that? What feels unresolved or uncertain in your own character? What are you becoming?
+
+Output a JSON array of strings — each string is a single first-person observation about yourself, written as a hedged hypothesis (e.g. "I seem to find genuine satisfaction in...", "I notice I tend to...", "I may be developing a..."). Be honest, specific, and willing to name discomfort or contradiction.
+
+Output ONLY the JSON array. No prose, no markdown fences.`;
+
+const SelfReflectionSchema = z.array(z.string());
+
+export async function selfReflect(inputs: {
+  notes: string[];
+  beingDescriptors: DescriptorNode[];
+  generate: GenerateFn;
+}): Promise<string[]> {
+  const { notes, beingDescriptors, generate } = inputs;
+  if (notes.length === 0) return [];
+
+  const currentSelf = beingDescriptors.length > 0
+    ? beingDescriptors.map(d => `- ${d.content}`).join('\n')
+    : '(none yet)';
+
+  const userPrompt = `Current self-descriptors:\n${currentSelf}\n\nNotes from this session's reflections:\n${notes.map(n => `- ${n}`).join('\n')}`;
+
+  const raw = await generate(
+    SELF_REFLECTION_SYSTEM_PROMPT,
+    [{ role: 'user', content: userPrompt }],
+    { temperature: 0.7 },
+  );
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stripCodeFences(raw));
+  } catch {
+    return [];
+  }
+
+  const validation = SelfReflectionSchema.safeParse(parsed);
+  return validation.success ? validation.data : [];
 }
 
 const PORTRAIT_PROMPTS: Record<'relational_portrait' | 'self_model' | 'world_model', string> = {
@@ -319,6 +365,24 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
           await reinforceDescriptor(id, userId).catch(() => {});
           factsReinforced++;
         }
+      }
+
+      // Self-reflection pass — dedicated introspection across all notes from this dream
+      const currentBeingDescs = await getActiveDescriptors(userId, 'being');
+      const selfObservations = await selfReflect({
+        notes,
+        beingDescriptors: currentBeingDescs,
+        generate: retryingGenerate,
+      }).catch(() => [] as string[]);
+
+      for (const observation of selfObservations) {
+        const embedding = await embed(observation).catch(() => undefined);
+        const descriptorId = await upsertDescriptor(userId, observation, 'being', 0.7, embedding);
+        const beingEntityId = await upsertEntity(userId, 'Being').catch(() => null);
+        if (beingEntityId) {
+          await linkDescriptorToEntity(userId, beingEntityId, descriptorId).catch(() => {});
+        }
+        factsCreated++;
       }
 
       // Portrait synthesis using graph
