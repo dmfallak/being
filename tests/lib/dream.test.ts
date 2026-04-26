@@ -296,6 +296,126 @@ test('selectReDreamCandidates respects limit', async () => {
   expect(result.length).toBeLessThanOrEqual(2);
 });
 
+test('mergeDescriptors creates new descriptor when no similar exists', async () => {
+  vi.clearAllMocks();
+  const graph = await import('../../src/lib/graph.js');
+  const embedMod = await import('../../src/lib/embed.js');
+
+  (embedMod.embed as any).mockResolvedValue([0.1, 0.2, 0.3]);
+  (graph.searchDescriptors as any).mockResolvedValue([]); // no similar
+
+  const { mergeDescriptors } = await import('../../src/lib/dream.js');
+  const generate = vi.fn();
+  const result = await mergeDescriptors('u1', [
+    { content: 'enjoys long conversations', category: 'user', entityName: 'Devin' },
+  ], generate);
+
+  expect(graph.upsertDescriptor).toHaveBeenCalledWith('u1', 'enjoys long conversations', 'user', 0.7, [0.1, 0.2, 0.3]);
+  expect(generate).not.toHaveBeenCalled();
+  expect(result).toEqual({ merged: 0, created: 1 });
+});
+
+test('mergeDescriptors merges and supersedes when LLM returns updated text', async () => {
+  vi.clearAllMocks();
+  const graph = await import('../../src/lib/graph.js');
+  const embedMod = await import('../../src/lib/embed.js');
+
+  (embedMod.embed as any).mockResolvedValue([0.5, 0.5, 0.5]);
+  (graph.searchDescriptors as any).mockResolvedValue([{
+    id: 'old-desc-id',
+    content: 'seems to value directness',
+    category: 'user',
+    salience: 0.8,
+    similarity: 0.92,
+    userId: 'u1',
+    supersededAt: null,
+    embedding: null,
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+    lastReinforcedAt: '2026-01-01T00:00:00Z',
+  }]);
+  (graph.upsertDescriptor as any).mockResolvedValue('new-desc-id');
+
+  const { mergeDescriptors } = await import('../../src/lib/dream.js');
+  const generate = vi.fn().mockResolvedValue('values directness and prefers concise technical communication');
+
+  const result = await mergeDescriptors('u1', [
+    { content: 'prefers concise technical communication', category: 'user', entityName: 'Devin' },
+  ], generate);
+
+  expect(generate).toHaveBeenCalledOnce();
+  expect(graph.upsertDescriptor).toHaveBeenCalledWith(
+    'u1', 'values directness and prefers concise technical communication', 'user', 0.7, expect.any(Array),
+  );
+  expect(graph.supersedeDescriptor).toHaveBeenCalledWith('old-desc-id', 'u1');
+  expect(result).toEqual({ merged: 1, created: 0 });
+});
+
+test('mergeDescriptors no-ops when LLM returns identical text', async () => {
+  vi.clearAllMocks();
+  const graph = await import('../../src/lib/graph.js');
+  const embedMod = await import('../../src/lib/embed.js');
+
+  const existingContent = 'seems to value directness';
+  (embedMod.embed as any).mockResolvedValue([0.5, 0.5, 0.5]);
+  (graph.searchDescriptors as any).mockResolvedValue([{
+    id: 'old-desc-id',
+    content: existingContent,
+    category: 'user',
+    salience: 0.8,
+    similarity: 0.94,
+    userId: 'u1',
+    supersededAt: null,
+    embedding: null,
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+    lastReinforcedAt: '2026-01-01T00:00:00Z',
+  }]);
+
+  const { mergeDescriptors } = await import('../../src/lib/dream.js');
+  const generate = vi.fn().mockResolvedValue(existingContent);
+
+  const result = await mergeDescriptors('u1', [
+    { content: 'still values directness', category: 'user', entityName: 'Devin' },
+  ], generate);
+
+  expect(graph.upsertDescriptor).not.toHaveBeenCalled();
+  expect(graph.supersedeDescriptor).not.toHaveBeenCalled();
+  expect(result).toEqual({ merged: 0, created: 0 });
+});
+
+test('mergeDescriptors falls back to creating new descriptor when LLM call fails', async () => {
+  vi.clearAllMocks();
+  const graph = await import('../../src/lib/graph.js');
+  const embedMod = await import('../../src/lib/embed.js');
+
+  (embedMod.embed as any).mockResolvedValue([0.5, 0.5, 0.5]);
+  (graph.searchDescriptors as any).mockResolvedValue([{
+    id: 'old-desc-id',
+    content: 'seems to value directness',
+    category: 'user',
+    salience: 0.8,
+    similarity: 0.92,
+    userId: 'u1',
+    supersededAt: null,
+    embedding: null,
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+    lastReinforcedAt: '2026-01-01T00:00:00Z',
+  }]);
+
+  const { mergeDescriptors } = await import('../../src/lib/dream.js');
+  const generate = vi.fn().mockRejectedValue(new Error('LLM error'));
+
+  const result = await mergeDescriptors('u1', [
+    { content: 'new observation', category: 'user', entityName: 'Devin' },
+  ], generate);
+
+  expect(graph.upsertDescriptor).toHaveBeenCalledWith('u1', 'new observation', 'user', 0.7, expect.any(Array));
+  expect(graph.supersedeDescriptor).not.toHaveBeenCalled();
+  expect(result).toEqual({ merged: 0, created: 1 });
+});
+
 vi.mock('../../src/lib/webSearchTool.js', () => ({
   webSearchTool: { description: 'mock', inputSchema: {}, execute: vi.fn() },
 }));

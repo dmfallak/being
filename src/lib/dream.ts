@@ -302,6 +302,76 @@ export async function selectReDreamCandidates(
     .map(s => s.conv);
 }
 
+const MERGE_SYSTEM_PROMPT = `You have an existing descriptor and a new observation about the same subject.
+Write a single updated descriptor that preserves everything still accurate from the old one and integrates the new information.
+If they say the same thing, return the old descriptor text unchanged.
+Output only the descriptor text. No prose, no explanation.`;
+
+export async function mergeDescriptors(
+  userId: string,
+  newHypotheses: Array<{ content: string; category: 'user' | 'world' | 'being'; entityName?: string }>,
+  generate: GenerateFn,
+): Promise<{ merged: number; created: number }> {
+  let merged = 0;
+  let created = 0;
+
+  for (const hypothesis of newHypotheses) {
+    try {
+      const embedding = await embed(hypothesis.content).catch(() => undefined);
+      const similar = embedding
+        ? await searchDescriptors(userId, embedding, 5).catch(() => [])
+        : [];
+
+      const match = similar.find(s => s.similarity >= MERGE_SIMILARITY_THRESHOLD);
+
+      if (!match) {
+        const descriptorId = await upsertDescriptor(userId, hypothesis.content, hypothesis.category, 0.7, embedding);
+        if (hypothesis.entityName) {
+          const entityId = await upsertEntity(userId, hypothesis.entityName).catch(() => null);
+          if (entityId) await linkDescriptorToEntity(userId, entityId, descriptorId).catch(() => {});
+        }
+        created++;
+        continue;
+      }
+
+      let mergedText: string;
+      try {
+        mergedText = await generate(
+          MERGE_SYSTEM_PROMPT,
+          [{ role: 'user', content: `Existing: ${match.content}\n\nNew observation: ${hypothesis.content}` }],
+        );
+      } catch {
+        // LLM failed — fall back to creating new descriptor without superseding
+        const descriptorId = await upsertDescriptor(userId, hypothesis.content, hypothesis.category, 0.7, embedding);
+        if (hypothesis.entityName) {
+          const entityId = await upsertEntity(userId, hypothesis.entityName).catch(() => null);
+          if (entityId) await linkDescriptorToEntity(userId, entityId, descriptorId).catch(() => {});
+        }
+        created++;
+        continue;
+      }
+
+      if (mergedText.trim() === match.content.trim()) {
+        // no change — no-op
+        continue;
+      }
+
+      const mergedEmbedding = await embed(mergedText).catch(() => undefined);
+      const newDescriptorId = await upsertDescriptor(userId, mergedText, hypothesis.category, 0.7, mergedEmbedding);
+      await supersedeDescriptor(match.id, userId).catch(() => {});
+      if (hypothesis.entityName) {
+        const entityId = await upsertEntity(userId, hypothesis.entityName).catch(() => null);
+        if (entityId) await linkDescriptorToEntity(userId, entityId, newDescriptorId).catch(() => {});
+      }
+      merged++;
+    } catch {
+      // skip this hypothesis on unexpected error
+    }
+  }
+
+  return { merged, created };
+}
+
 const PORTRAIT_PROMPTS: Record<'relational_portrait' | 'self_model' | 'world_model', string> = {
   relational_portrait: `You are the Being. Based on the facts below, write 2-4 paragraphs describing who this person is and how you work together.
 
