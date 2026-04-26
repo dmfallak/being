@@ -70,6 +70,8 @@ Pass args as an array of strings:
       const category =
         rawCategory === 'world' || rawCategory === 'being' ? rawCategory : 'user';
 
+      // embed failure is intentional fallback: descriptor is still written (without embedding),
+      // duplicate check is best-effort and skipped if embedding is unavailable.
       const embedding = await embed(content).catch(() => undefined);
       if (embedding) {
         const similar = await searchDescriptors(userId, embedding, 3).catch(() => []);
