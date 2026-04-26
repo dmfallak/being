@@ -92,7 +92,7 @@ export async function upsertEntityRelation(
        MERGE (to:Entity {userId: $userId, name: $toName})
        ON CREATE SET to.id = randomUUID(), to.createdAt = $now
        MERGE (from)-[:RELATES_TO {type: $type, userId: $userId}]->(to)`,
-      { userId, fromName, toName, type, now: new Date().toISOString() },
+      { userId, fromName, toName, type: type.toUpperCase(), now: new Date().toISOString() },
     );
   } finally {
     await session.close();

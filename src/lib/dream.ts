@@ -530,20 +530,11 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
           await upsertEntityRelation(userId, relation.fromName, relation.toName, relation.type).catch(() => {});
         }
 
-        // Write new descriptors and optionally link to entities
-        for (const hypothesis of reflection.newHypotheses) {
-          const embedding = await embed(hypothesis.content).catch(() => undefined);
-          const descriptorId = await upsertDescriptor(
-            userId, hypothesis.content, hypothesis.category, 0.7, embedding,
-          );
-          if (hypothesis.entityName) {
-            const entityId = await upsertEntity(userId, hypothesis.entityName).catch(() => null);
-            if (entityId) {
-              await linkDescriptorToEntity(userId, entityId, descriptorId).catch(() => {});
-            }
-          }
-          factsCreated++;
-        }
+        // Descriptors go through merge step to prevent semantic duplicates across dreams
+        const { created: hypCreated } = await mergeDescriptors(
+          userId, reflection.newHypotheses, dreamGenerate,
+        ).catch(() => ({ created: 0, merged: 0 }));
+        factsCreated += hypCreated;
 
         for (const oldId of reflection.supersededOldIds) {
           await supersedeDescriptor(oldId, userId).catch(() => {});
@@ -554,7 +545,7 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
           factsReinforced++;
         }
 
-        process.stdout.write(`dream: +${reflection.newHypotheses.length} hypotheses, ${reflection.reinforcedIds.length} reinforced\n`);
+        process.stdout.write(`dream: +${hypCreated} new descriptors (${reflection.newHypotheses.length} hypotheses), ${reflection.reinforcedIds.length} reinforced\n`);
       }
 
       // Self-reflection pass — dedicated introspection across all notes from this dream
