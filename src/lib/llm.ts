@@ -24,6 +24,11 @@ function formatToolCall(name: string, args: Record<string, unknown>): string {
 
 function formatToolResult(name: string, result: Record<string, unknown>): string {
   if (result.error) return `error: ${result.error}`;
+  if (name === 'alchemy') {
+    const exit = result.exitCode as number | undefined;
+    const out = (result.stdout as string | undefined)?.trim().slice(0, 80);
+    return exit === 0 ? (out || 'ok') : `exit ${exit}`;
+  }
   if (name === 'memory') {
     if (Array.isArray(result.results)) return `${(result.results as unknown[]).length} results`;
     if (result.found === false) return 'not found';
@@ -50,10 +55,10 @@ export async function generateResponse(
     stopWhen: stepCountIs(MAX_TOOL_STEPS),
     onStepFinish: ({ toolCalls, toolResults }) => {
       for (const call of toolCalls) {
-        const label = formatToolCall(call.toolName, call.args as Record<string, unknown>);
+        const label = formatToolCall(call.toolName, call.input as Record<string, unknown>);
         const result = toolResults.find(r => r.toolCallId === call.toolCallId);
         const resultStr = result
-          ? ` → ${formatToolResult(call.toolName, result.result as Record<string, unknown>)}`
+          ? ` → ${formatToolResult(call.toolName, result.output as Record<string, unknown>)}`
           : '';
         process.stdout.write(`  [${label}${resultStr}]\n`);
       }
