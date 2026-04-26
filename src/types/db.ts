@@ -6,6 +6,8 @@ export type ConversationRow = {
   emotional_intensity: number | null;
   prediction_error: number | null;
   last_dream_at: Date | null;
+  redream_count: number;
+  last_redream_at: Date | null;
 };
 
 export type MessageRow = {
