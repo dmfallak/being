@@ -41,13 +41,13 @@ test('linkDescriptorToEntity runs a MERGE query', async () => {
   expect(run).toHaveBeenCalledWith(expect.stringContaining('HAS_DESCRIPTOR'), expect.any(Object));
 });
 
-test('upsertEntityRelation runs a MERGE query with freeform type', async () => {
+test('upsertEntityRelation normalises type to lowercase underscore', async () => {
   run.mockResolvedValue({ records: [] });
   const { upsertEntityRelation } = await import('../../src/lib/graph.js');
   await upsertEntityRelation('u1', 'Devin', 'Being Project', 'works on');
   expect(run).toHaveBeenCalledWith(
     expect.stringContaining('RELATES_TO'),
-    expect.objectContaining({ fromName: 'Devin', toName: 'Being Project', type: 'works on' }),
+    expect.objectContaining({ fromName: 'Devin', toName: 'Being Project', type: 'works_on' }),
   );
 });
 
