@@ -56,6 +56,10 @@ test('getReDreamCandidatePool returns dreamed conversations excluding recent re-
   expect(ids).not.toContain(neverDreamed.id);
   expect(ids).not.toContain(recentlyReDreamed.id);
 
+  // Also verify empty exclusion list works (exercises the nil-UUID fallback)
+  const withEmptyExclude = await getReDreamCandidatePool('u-redream-test', []);
+  expect(withEmptyExclude.map(c => c.id)).toContain(dreamedLongAgo.id);
+
   await db.query(`DELETE FROM conversations WHERE user_id = 'u-redream-test'`);
 });
 

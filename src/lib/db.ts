@@ -202,6 +202,11 @@ export async function getReDreamCandidatePool(
   excludeConversationIds: string[],
   client: pg.PoolClient | pg.Pool = db,
 ): Promise<ConversationRow[]> {
+  // Use a nil UUID sentinel when the exclusion list is empty so the query
+  // planner sees a stable array type rather than an untyped empty literal.
+  const excludeList = excludeConversationIds.length > 0
+    ? excludeConversationIds
+    : ['00000000-0000-0000-0000-000000000000'];
   const result = await client.query<ConversationRow>(
     `SELECT * FROM conversations
      WHERE user_id = $1
@@ -209,7 +214,7 @@ export async function getReDreamCandidatePool(
        AND (last_redream_at IS NULL OR last_redream_at < now() - interval '7 days')
        AND id != ALL($2::uuid[])
      ORDER BY last_dream_at ASC`,
-    [userId, excludeConversationIds.length > 0 ? excludeConversationIds : ['00000000-0000-0000-0000-000000000000']],
+    [userId, excludeList],
   );
   return result.rows;
 }
@@ -218,12 +223,15 @@ export async function incrementReDreamCount(
   conversationId: string,
   client: pg.PoolClient | pg.Pool = db,
 ): Promise<void> {
-  await client.query(
+  const result = await client.query(
     `UPDATE conversations
      SET redream_count = redream_count + 1, last_redream_at = now()
      WHERE id = $1`,
     [conversationId],
   );
+  if ((result.rowCount ?? 0) === 0) {
+    throw new Error(`incrementReDreamCount: no conversation found for id ${conversationId}`);
+  }
 }
 
 export async function markConversationsDreamed(
