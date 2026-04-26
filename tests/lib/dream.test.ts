@@ -130,7 +130,7 @@ test('reflectOnConversation parses graph_updates from reflection output', async 
       note: 'Noted.',
       graph_updates: {
         entities: [{ name: 'Devin' }, { name: 'Being Project' }],
-        relations: [{ fromName: 'Devin', toName: 'Being Project', type: 'works on' }],
+        relations: [{ fromName: 'Devin', toName: 'Being Project', type: 'works_on' }],
       },
     }),
   );
@@ -142,7 +142,7 @@ test('reflectOnConversation parses graph_updates from reflection output', async 
   expect(result).not.toBeNull();
   expect(result!.graphUpdates.entities).toHaveLength(2);
   expect(result!.graphUpdates.relations[0]).toMatchObject({
-    fromName: 'Devin', toName: 'Being Project', type: 'works on',
+    fromName: 'Devin', toName: 'Being Project', type: 'works_on',
   });
   expect(result!.newHypotheses[0]!.entityName).toBe('Devin');
 });
