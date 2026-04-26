@@ -17,18 +17,6 @@ export type MessageRow = {
   created_at: Date;
 };
 
-export type EntityFactRow = {
-  id: string;
-  user_id: string;
-  content: string;
-  category: 'user' | 'world' | 'being';
-  salience: number;
-  superseded_at: Date | null;
-  created_at: Date;
-  updated_at: Date;
-  last_reinforced_at: Date;
-};
-
 export type DreamRunRow = {
   id: string;
   user_id: string;

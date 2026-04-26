@@ -6,7 +6,6 @@ import { generateResponse } from '../lib/llm.js';
 import { updateState } from '../lib/ssm.js';
 import { embed } from '../lib/embed.js';
 import { createConversation, saveMessage, getLatestArtifacts } from '../lib/db.js';
-import { extractFacts } from '../lib/entity.js';
 import { maybeDream } from '../lib/dream.js';
 import type { Message } from '../lib/llm.js';
 
@@ -66,11 +65,6 @@ export async function startSession(
       currentState = await updateState(currentState, userInput);
     }
   } finally {
-    if (conversationId && history.length > 0) {
-      await extractFacts(DEFAULT_USER_ID, history).catch(err => {
-        console.error('Entity extraction failed:', err);
-      });
-    }
     if (!rl) {
       interfaceInstance.close();
     }

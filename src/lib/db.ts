@@ -4,7 +4,6 @@ import { config } from './config.js';
 import type {
   ConversationRow,
   MessageRow,
-  EntityFactRow,
   DreamRunRow,
   DreamArtifactRow,
 } from '../types/db.js';
@@ -40,57 +39,6 @@ export async function saveMessage(
   const row = result.rows[0];
   if (!row) throw new Error('Failed to save message');
   return row;
-}
-
-export async function getEntityFacts(userId: string): Promise<EntityFactRow[]> {
-  const result = await db.query<EntityFactRow>(
-    'SELECT * FROM entity_facts WHERE user_id = $1 ORDER BY salience DESC',
-    [userId],
-  );
-  return result.rows;
-}
-
-export async function upsertEntityFact(
-  userId: string,
-  content: string,
-  salience: number,
-  category: 'user' | 'world' | 'being' = 'user',
-  embedding?: number[],
-  client: pg.PoolClient | pg.Pool = db,
-): Promise<void> {
-  const vectorParam = embedding ? `[${embedding.join(',')}]` : null;
-  await client.query(
-    `INSERT INTO entity_facts (user_id, content, salience, category, embedding)
-     VALUES ($1, $2, $3, $4, $5::vector)
-     ON CONFLICT (user_id, content) DO UPDATE
-       SET updated_at = now(), category = EXCLUDED.category,
-           embedding = COALESCE(EXCLUDED.embedding, entity_facts.embedding)`,
-    [userId, content, salience, category, vectorParam],
-  );
-}
-
-export async function getEntityFactEmbeddings(
-  userId: string,
-  queryEmbedding: number[],
-  limit = 50,
-): Promise<Array<{ id: string; content: string; salience: number; similarity: number }>> {
-  const vectorParam = `[${queryEmbedding.join(',')}]`;
-  const result = await db.query<{
-    id: string;
-    content: string;
-    salience: number;
-    similarity: number;
-  }>(
-    `SELECT id, content, salience,
-            1 - (embedding <=> $1::vector) AS similarity
-     FROM entity_facts
-     WHERE user_id = $2
-       AND embedding IS NOT NULL
-     ORDER BY embedding <=> $1::vector
-     LIMIT $3`,
-    [vectorParam, userId, limit],
-  );
-  return result.rows;
 }
 
 export async function withTransaction<T>(
@@ -158,83 +106,6 @@ export async function getMessagesForConversation(
     [conversationId],
   );
   return result.rows;
-}
-
-export async function getAllEntityFacts(
-  userId: string,
-  client: pg.PoolClient | pg.Pool = db,
-): Promise<EntityFactRow[]> {
-  const result = await client.query<EntityFactRow>(
-    `SELECT * FROM entity_facts WHERE user_id = $1`,
-    [userId],
-  );
-  return result.rows;
-}
-
-export async function getActiveFacts(
-  userId: string,
-  client: pg.PoolClient | pg.Pool = db,
-): Promise<EntityFactRow[]> {
-  const result = await client.query<EntityFactRow>(
-    `SELECT * FROM entity_facts
-     WHERE user_id = $1 AND superseded_at IS NULL`,
-    [userId],
-  );
-  return result.rows;
-}
-
-export async function getActiveFactsByCategory(
-  userId: string,
-  category: 'user' | 'world' | 'being',
-  client: pg.PoolClient | pg.Pool = db,
-): Promise<EntityFactRow[]> {
-  const result = await client.query<EntityFactRow>(
-    `SELECT * FROM entity_facts
-     WHERE user_id = $1 AND category = $2 AND superseded_at IS NULL
-     ORDER BY salience DESC`,
-    [userId, category],
-  );
-  return result.rows;
-}
-
-export async function updateFactSalience(
-  factId: string,
-  userId: string,
-  newSalience: number,
-  client: pg.PoolClient | pg.Pool = db,
-): Promise<void> {
-  await client.query(
-    `UPDATE entity_facts SET salience = $3
-     WHERE id = $1 AND user_id = $2`,
-    [factId, userId, newSalience],
-  );
-}
-
-export async function reinforceFact(
-  factId: string,
-  userId: string,
-  client: pg.PoolClient | pg.Pool = db,
-): Promise<boolean> {
-  const result = await client.query(
-    `UPDATE entity_facts
-     SET salience = LEAST(salience + 0.1, 1.0),
-         last_reinforced_at = now()
-     WHERE id = $1 AND user_id = $2`,
-    [factId, userId],
-  );
-  return (result.rowCount ?? 0) > 0;
-}
-
-export async function supersedeEntityFact(
-  factId: string,
-  userId: string,
-  client: pg.PoolClient | pg.Pool = db,
-): Promise<void> {
-  await client.query(
-    `UPDATE entity_facts SET superseded_at = now()
-     WHERE id = $1 AND user_id = $2`,
-    [factId, userId],
-  );
 }
 
 export async function insertDreamRun(
