@@ -23,8 +23,54 @@ import {
   updateDescriptorSaliences,
   getActiveDescriptors,
 } from './graph.js';
+import { google } from '@ai-sdk/google';
+import { generateText, stepCountIs } from 'ai';
 import { generateResponse } from './llm.js';
+import { webSearchTool } from './webSearchTool.js';
 import { embed } from './embed.js';
+
+const DREAM_WEB_SEARCHES_CAP = 5;
+const DREAM_MAX_STEPS = 12;
+
+function makeDreamGenerateFn(): { generate: GenerateFn; searchesUsed: () => number } {
+  let searchesRemaining = DREAM_WEB_SEARCHES_CAP;
+
+  const generate: GenerateFn = async (systemPrompt, messages, options) => {
+    const args: Parameters<typeof generateText>[0] = {
+      model: google('gemini-3-flash-preview'),
+      system: systemPrompt,
+      messages,
+      maxSteps: DREAM_MAX_STEPS,
+      stopWhen: stepCountIs(DREAM_MAX_STEPS),
+      onStepFinish: ({ toolCalls }) => {
+        const webCalls = (toolCalls as Array<{ toolName: string }>).filter(c => c.toolName === 'web').length;
+        if (webCalls > 0) {
+          searchesRemaining -= webCalls;
+          process.stdout.write(`dream: web search (${searchesRemaining} remaining this dream)\n`);
+        }
+      },
+    };
+
+    if (searchesRemaining > 0) {
+      args.tools = { web: webSearchTool };
+    }
+
+    if (options?.temperature !== undefined) {
+      args.temperature = options.temperature;
+    }
+
+    try {
+      const { text } = await generateText(args);
+      return text;
+    } catch {
+      await new Promise(r => setTimeout(r, 1000));
+      const { text } = await generateText(args);
+      return text;
+    }
+  };
+
+  return { generate, searchesUsed: () => DREAM_WEB_SEARCHES_CAP - searchesRemaining };
+}
 
 export const DECAY_FACTOR = 0.999;
 
@@ -304,6 +350,8 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
       const totalUnprocessed = await countUnprocessedConversations(userId, client);
       const capHit = totalUnprocessed > CONVERSATIONS_PER_DREAM_CAP;
 
+      process.stdout.write(`dream: processing ${conversations.length} conversation${conversations.length === 1 ? '' : 's'}${capHit ? ` (${totalUnprocessed - conversations.length} deferred)` : ''}\n`);
+
       // Salience decay: compute per-descriptor and batch-update
       const allDescriptors = await getActiveDescriptors(userId);
       const salienceUpdates = allDescriptors.map(d => {
@@ -312,22 +360,27 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
         return { id: d.id, salience: computeDecayedSalience(d.salience, daysSince) };
       });
       await updateDescriptorSaliences(salienceUpdates, userId);
+      process.stdout.write(`dream: decayed ${allDescriptors.length} descriptor saliences\n`);
 
       const activeDescriptors = await getActiveDescriptors(userId);
+      const { generate: dreamGenerate, searchesUsed } = makeDreamGenerateFn();
 
       const notes: string[] = [];
       let factsCreated = 0;
       let factsReinforced = 0;
       let parseFailures = 0;
 
-      for (const conv of conversations) {
+      for (let i = 0; i < conversations.length; i++) {
+        const conv = conversations[i]!;
+        process.stdout.write(`dream: reflecting on conversation ${i + 1}/${conversations.length}\n`);
         const messages = await getMessagesForConversation(conv.id, client);
         const reflection = await reflectOnConversation({
           facts: activeDescriptors,
           messages: messages.map(m => ({ role: m.role, content: m.content })),
-          generate: retryingGenerate,
+          generate: dreamGenerate,
         });
         if (reflection === null) {
+          process.stdout.write(`dream: reflection parse failed, skipping\n`);
           parseFailures++;
           continue;
         }
@@ -365,14 +418,17 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
           await reinforceDescriptor(id, userId).catch(() => {});
           factsReinforced++;
         }
+
+        process.stdout.write(`dream: +${reflection.newHypotheses.length} hypotheses, ${reflection.reinforcedIds.length} reinforced\n`);
       }
 
       // Self-reflection pass — dedicated introspection across all notes from this dream
+      process.stdout.write(`dream: self-reflecting across ${notes.length} note${notes.length === 1 ? '' : 's'}\n`);
       const currentBeingDescs = await getActiveDescriptors(userId, 'being');
       const selfObservations = await selfReflect({
         notes,
         beingDescriptors: currentBeingDescs,
-        generate: retryingGenerate,
+        generate: dreamGenerate,
       }).catch(() => [] as string[]);
 
       for (const observation of selfObservations) {
@@ -384,8 +440,10 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
         }
         factsCreated++;
       }
+      process.stdout.write(`dream: ${selfObservations.length} self-observations written\n`);
 
       // Portrait synthesis using graph
+      process.stdout.write(`dream: synthesizing portraits\n`);
       const [userDescs, worldDescs, beingDescs] = await Promise.all([
         getActiveDescriptors(userId, 'user'),
         getActiveDescriptors(userId, 'world'),
@@ -408,12 +466,14 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
       ];
 
       for (const { type, inputFacts } of portraitDefs) {
+        process.stdout.write(`dream: generating ${type}\n`);
         const prose = await generatePortrait(type, inputFacts, retryingGenerate).catch(() => null);
         if (!prose) continue;
         const embedding = await embed(prose).catch(() => null);
         await insertDreamArtifact(dreamRun.id, userId, type, prose, embedding, client);
       }
 
+      process.stdout.write(`dream: generating residue\n`);
       const residueProse = await generateResidue({
         notes,
         factsCreatedCount: factsCreated,
@@ -438,6 +498,7 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
         client,
       );
 
+      process.stdout.write(`dream: complete — ${factsCreated} facts created, ${factsReinforced} reinforced, ${searchesUsed()} web searches\n`);
       return { dreamed: true, capHit };
     });
   } catch (err) {

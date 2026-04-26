@@ -223,6 +223,22 @@ test('generatePortrait: returns null when facts array is empty', async () => {
   expect(generate).not.toHaveBeenCalled();
 });
 
+vi.mock('../../src/lib/webSearchTool.js', () => ({
+  webSearchTool: { description: 'mock', inputSchema: {}, execute: vi.fn() },
+}));
+
+vi.mock('@ai-sdk/google', () => ({
+  google: vi.fn().mockReturnValue('mock-model'),
+}));
+
+vi.mock('ai', async () => {
+  const actual = await vi.importActual<typeof import('ai')>('ai');
+  return {
+    ...actual,
+    generateText: vi.fn().mockResolvedValue({ text: 'mock dream reflection', steps: [] }),
+  };
+});
+
 vi.mock('../../src/lib/graph.js', () => ({
   upsertEntity: vi.fn().mockResolvedValue('entity-uuid'),
   upsertDescriptor: vi.fn().mockResolvedValue('desc-uuid'),
@@ -307,20 +323,27 @@ test('maybeDream: full happy path — decays, reflects, reinforces, extracts, pe
   const artifactRow = { id: 'art-1', dream_run_id: 'dr-1', user_id: 'u1', type: 'residue', prose: 'p', embedding: null, created_at: new Date() };
   (db.insertDreamArtifact as any).mockResolvedValue(artifactRow);
 
-  (llm.generateResponse as any)
-    .mockResolvedValueOnce(JSON.stringify({
-      new_hypotheses: [{ content: 'enjoys morning conversations', category: 'user' }],
+  // reflections + self-reflection go through generateText (makeDreamGenerateFn)
+  const ai = await import('ai');
+  (ai.generateText as any)
+    .mockResolvedValueOnce({ text: JSON.stringify({
+      new_hypotheses: [{ content: 'enjoys morning conversations', category: 'user', entityName: 'Devin' }],
       reinforced_ids: ['fact-existing'],
       superseded_old_ids: [],
       note: 'Warmer tone.',
-    }))
-    .mockResolvedValueOnce(JSON.stringify({
+      graph_updates: { entities: [], relations: [] },
+    }), steps: [] })
+    .mockResolvedValueOnce({ text: JSON.stringify({
       new_hypotheses: [],
       reinforced_ids: ['fact-existing'],
       superseded_old_ids: [],
       note: 'Quieter.',
-    }))
-    .mockResolvedValue('generated prose');
+      graph_updates: { entities: [], relations: [] },
+    }), steps: [] })
+    .mockResolvedValueOnce({ text: '[]', steps: [] }); // self-reflection
+
+  // portraits + residue go through generateResponse
+  (llm.generateResponse as any).mockResolvedValue('generated prose');
 
   const { maybeDream } = await import('../../src/lib/dream.js');
   const result = await maybeDream('u1');
@@ -358,10 +381,13 @@ test('maybeDream: sets cap_hit when unprocessed count exceeds cap', async () => 
     type: 'residue', prose: 'p', embedding: null, created_at: new Date(),
   });
 
-  (llm.generateResponse as any).mockImplementation(async (_sys: string, _msgs: any, opts: any) => {
-    if (opts?.temperature === 1.2 || opts?.temperature === 0.6) return 'p';
-    return JSON.stringify({ new_hypotheses: [], reinforced_ids: [], superseded_old_ids: [], note: 'ok' });
-  });
+  const ai = await import('ai');
+  const validReflection = { text: JSON.stringify({
+    new_hypotheses: [], reinforced_ids: [], superseded_old_ids: [], note: 'ok',
+    graph_updates: { entities: [], relations: [] },
+  }), steps: [] };
+  (ai.generateText as any).mockResolvedValue(validReflection); // 30 reflections + self-reflection
+  (llm.generateResponse as any).mockResolvedValue('p'); // portraits + residue
 
   const { maybeDream } = await import('../../src/lib/dream.js');
   const result = await maybeDream('u1');
@@ -399,10 +425,15 @@ test('maybeDream: malformed reflection drops that conversation but dream still c
     type: 'residue', prose: 'p', embedding: null, created_at: new Date(),
   });
 
-  (llm.generateResponse as any)
-    .mockResolvedValueOnce(JSON.stringify({ new_hypotheses: [], reinforced_ids: [], superseded_old_ids: [], note: 'n' }))
-    .mockResolvedValueOnce('totally not json')
-    .mockResolvedValue('p');
+  const ai = await import('ai');
+  (ai.generateText as any)
+    .mockResolvedValueOnce({ text: JSON.stringify({
+      new_hypotheses: [], reinforced_ids: [], superseded_old_ids: [], note: 'n',
+      graph_updates: { entities: [], relations: [] },
+    }), steps: [] })
+    .mockResolvedValueOnce({ text: 'totally not json', steps: [] }) // malformed
+    .mockResolvedValueOnce({ text: '[]', steps: [] }); // self-reflection
+  (llm.generateResponse as any).mockResolvedValue('p'); // portraits + residue
 
   const { maybeDream } = await import('../../src/lib/dream.js');
   const result = await maybeDream('u1');
@@ -439,7 +470,9 @@ test('maybeDream: on pipeline error, records failure and returns non-dreamed out
   ]);
   (graph.getActiveDescriptors as any).mockResolvedValue([]);
   (db.getMessagesForConversation as any).mockResolvedValue([]);
-  (llm.generateResponse as any)
+  // reflection goes through generateText — reject twice (with retry) to trigger pipeline error
+  const ai = await import('ai');
+  (ai.generateText as any)
     .mockRejectedValueOnce(new Error('boom'))
     .mockRejectedValueOnce(new Error('boom-retry'));
 
