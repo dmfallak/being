@@ -34,7 +34,7 @@ import { generateResponse } from './llm.js';
 import { webSearchTool } from './webSearchTool.js';
 import { embed } from './embed.js';
 
-const DREAM_WEB_SEARCHES_CAP = 5;
+const DREAM_WEB_SEARCHES_CAP = 20;
 const DREAM_MAX_STEPS = 12;
 
 function makeDreamGenerateFn(): { generate: GenerateFn; searchesUsed: () => number } {
@@ -568,6 +568,77 @@ async function runDream(userId: string, now: Date): Promise<DreamOutcome> {
         factsCreated++;
       }
       process.stdout.write(`dream: ${selfObservations.length} self-observations written\n`);
+
+      // Re-dream block: revisit old conversations with current context + web search
+      const recentMessageTexts: string[] = [];
+      for (const conv of conversations) {
+        const msgs = await getMessagesForConversation(conv.id, client);
+        recentMessageTexts.push(...msgs.map(m => m.content));
+      }
+
+      const reDreamCandidates = await selectReDreamCandidates(
+        userId,
+        REDREAM_CANDIDATES_PER_DREAM,
+        conversations.map(c => c.id),
+        recentMessageTexts,
+      ).catch((err) => {
+        process.stdout.write(`dream: re-dream candidate selection failed: ${err}\n`);
+        return [] as ConversationRow[];
+      });
+
+      process.stdout.write(`dream: re-dreaming ${reDreamCandidates.length} old conversation${reDreamCandidates.length === 1 ? '' : 's'}\n`);
+      let reDreamMerged = 0;
+      let reDreamCreated = 0;
+
+      for (const candidate of reDreamCandidates) {
+        const dateStr = new Date(candidate.created_at).toISOString().slice(0, 10);
+        process.stdout.write(`dream: re-dreaming conversation from ${dateStr}\n`);
+
+        const reDreamMessages = await getMessagesForConversation(candidate.id, client);
+        const reDreamReflection = await reflectOnConversation({
+          facts: activeDescriptors,
+          messages: reDreamMessages.map(m => ({ role: m.role, content: m.content })),
+          generate: dreamGenerate,
+        });
+
+        if (reDreamReflection === null) {
+          process.stdout.write(`dream: re-dream reflection parse failed, skipping\n`);
+          parseFailures++;
+          await incrementReDreamCount(candidate.id, client);
+          continue;
+        }
+
+        // Entities and relations written freely — MERGE is idempotent
+        for (const entity of reDreamReflection.graphUpdates.entities) {
+          await upsertEntity(userId, entity.name).catch(() => {});
+        }
+        for (const relation of reDreamReflection.graphUpdates.relations) {
+          await upsertEntityRelation(userId, relation.fromName, relation.toName, relation.type).catch(() => {});
+        }
+
+        // Descriptors go through merge step
+        const { merged, created } = await mergeDescriptors(
+          userId,
+          reDreamReflection.newHypotheses,
+          dreamGenerate,
+        );
+        reDreamMerged += merged;
+        reDreamCreated += created;
+        factsCreated += created + merged;
+
+        for (const oldId of reDreamReflection.supersededOldIds) {
+          await supersedeDescriptor(oldId, userId).catch(() => {});
+        }
+        for (const id of reDreamReflection.reinforcedIds) {
+          await reinforceDescriptor(id, userId).catch(() => {});
+          factsReinforced++;
+        }
+
+        // Increment redream_count — do NOT update last_dream_at
+        await incrementReDreamCount(candidate.id, client);
+      }
+
+      process.stdout.write(`dream: re-dreamed ${reDreamCandidates.length} conversations — ${reDreamMerged} merged, ${reDreamCreated} new descriptors\n`);
 
       // Portrait synthesis using graph
       process.stdout.write(`dream: synthesizing portraits\n`);

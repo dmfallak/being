@@ -683,3 +683,54 @@ test('maybeDream: on pipeline error, records failure and returns non-dreamed out
     expect.objectContaining({ error: expect.stringContaining('boom') }),
   );
 });
+
+test('maybeDream: re-dreams a candidate conversation and increments redream_count', async () => {
+  const db = await import('../../src/lib/db.js');
+  const graph = await import('../../src/lib/graph.js');
+  const llm = await import('../../src/lib/llm.js');
+  const ai = await import('ai');
+  vi.clearAllMocks();
+
+  const mockClient = { query: vi.fn() };
+  (db.withTransaction as any).mockImplementation(async (fn: any) => fn(mockClient));
+  (db.countUnprocessedConversations as any).mockResolvedValue(1);
+  (db.insertDreamRun as any).mockResolvedValue({
+    id: 'dr-redream', user_id: 'u1', started_at: new Date(), completed_at: null,
+    conversations_processed: 0, facts_created: 0, facts_reinforced: 0, cap_hit: false, error: null,
+  });
+  (db.getUnprocessedConversations as any).mockResolvedValue([
+    { id: 'c-new', user_id: 'u1', created_at: new Date(), emotional_intensity: null,
+      prediction_error: null, last_dream_at: null, redream_count: 0, last_redream_at: null },
+  ]);
+  (graph.getActiveDescriptors as any).mockResolvedValue([]);
+  (db.getMessagesForConversation as any).mockResolvedValue([
+    { id: 'm1', conversation_id: 'c-new', user_id: 'u1', role: 'user', content: 'Devin is working on the Being Project', created_at: new Date() },
+  ]);
+  (graph.getAllEntityNames as any).mockResolvedValue(['Devin']);
+  (db.getReDreamCandidatePool as any).mockResolvedValue([
+    { id: 'c-old', user_id: 'u1', created_at: new Date('2026-01-01'),
+      last_dream_at: new Date('2026-01-01'), redream_count: 0, last_redream_at: null,
+      emotional_intensity: null, prediction_error: null },
+  ]);
+  (graph.searchDescriptors as any).mockResolvedValue([]); // no merge needed
+  (db.insertDreamArtifact as any).mockResolvedValue({
+    id: 'art-1', dream_run_id: 'dr-redream', user_id: 'u1', type: 'residue',
+    prose: 'p', embedding: null, created_at: new Date(),
+  });
+
+  const validReflection = { text: JSON.stringify({
+    new_hypotheses: [], reinforced_ids: [], superseded_old_ids: [], note: 'ok',
+    graph_updates: { entities: [], relations: [] },
+  }), steps: [] };
+  (ai.generateText as any).mockResolvedValue(validReflection);
+  (llm.generateResponse as any).mockResolvedValue('p');
+
+  const { maybeDream } = await import('../../src/lib/dream.js');
+  await maybeDream('u1');
+
+  expect(db.incrementReDreamCount).toHaveBeenCalledWith('c-old', expect.anything());
+  expect(db.markConversationsDreamed).toHaveBeenCalledWith(['c-new'], mockClient);
+  expect(db.markConversationsDreamed).not.toHaveBeenCalledWith(
+    expect.arrayContaining(['c-old']), expect.anything(),
+  );
+});
