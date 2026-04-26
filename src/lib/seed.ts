@@ -1,5 +1,18 @@
 // src/lib/seed.ts
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { WakingArtifacts } from '../types/artifacts.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+function loadEthics(): string | null {
+  try {
+    return readFileSync(join(__dirname, '../../ETHICS.md'), 'utf8').trim();
+  } catch {
+    return null;
+  }
+}
 
 export const SEED_PROMPT = `## Epistemic Layer — How You Know
 
@@ -38,6 +51,11 @@ export function buildSystemPrompt(artifacts?: WakingArtifacts): string {
   }
   if (artifacts?.residue) {
     sections.push(`### This Morning\n\n${artifacts.residue}`);
+  }
+
+  const ethics = loadEthics();
+  if (ethics) {
+    sections.push(`## Code of Ethics\n\n${ethics}`);
   }
 
   if (sections.length === 0) return SEED_PROMPT;
