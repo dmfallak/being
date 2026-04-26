@@ -2,13 +2,19 @@
 
 ## Goal
 
-Enable the Being to revisit old conversations during dreams — not to re-extract the same facts, but to form new connections and update its understanding with new information (web search, accumulated graph context, evolved self-model). Mirrors how human dreaming returns to unresolved or significant material across time.
+Enable the Being to revisit old conversations during dreams with three distinct capabilities:
+
+1. **Update existing understanding** — merge evolved descriptors with new information from web search and accumulated graph context
+2. **Discover what was missed** — extract entities, relations, and descriptors that the Being wasn't equipped to notice the first time (improved reflection prompt, better entity recognition, richer graph context to reason against)
+3. **Form new connections** — with a fuller graph, the Being can now see how a conversation relates to people, projects, and concepts that didn't exist in the graph when it was first dreamed
+
+Mirrors how human dreaming returns to unresolved or significant material across time — not to replay it identically, but to understand it differently.
 
 ## Core Principle
 
-Re-dreaming is not reprocessing. The Being already extracted what it could from old conversations at the time. Re-dreaming asks: *what would I understand differently now, given everything I've learned since and everything the world has published since?*
+Re-dreaming is not reprocessing. The Being runs the same reflection pipeline on old conversations, but the pipeline is materially different: it has web search, a richer graph, and a more developed self-model. The same transcript produces different — and ideally richer — output.
 
-New hypotheses from re-dreaming go through a merge step: check for similar existing descriptors, and if found, produce a single updated descriptor that preserves what hasn't changed and integrates what's new. The old descriptor is superseded. Nothing is duplicated.
+**Entities and relations** from re-dreaming are written freely (MERGE is idempotent, new ones are simply created). **Descriptors** go through a merge step: check for similar existing ones, and if found, produce a single updated descriptor that preserves what hasn't changed and integrates what's new. The old descriptor is superseded. Nothing is duplicated.
 
 ---
 
@@ -89,9 +95,10 @@ for each candidate:
   reflection = await reflectOnConversation({ facts: activeDescriptors, messages, generate: dreamGenerate })
   if reflection === null: log parse failure, continue
 
-  // graph_updates and reinforced/superseded handled identically to new conversations
+  // entities and relations written freely — MERGE is idempotent, new ones are created,
+  // existing ones are no-ops. Re-dreaming may discover entities and relations missed the first time.
   write entities + relations from graph_updates
-  await mergeDescriptors(userId, reflection.newHypotheses, dreamGenerate)  // merge instead of direct write
+  await mergeDescriptors(userId, reflection.newHypotheses, dreamGenerate)  // descriptors: merge or create
   handle reinforced_ids and superseded_old_ids normally
 
   // increment redream_count, do NOT update last_dream_at
